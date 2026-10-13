@@ -8,11 +8,12 @@ import {tokenPairs} from './market-feed.ts';
 import {WSOL,SOL_MAINNET_GENESIS,validateSolConfig,solUnits,solDecimal,type SolConfig,type SolReport,type SolRoute,type SolPreview} from './solana-types.ts';
 import {KAMINO_PROGRAM,KAMINO_MARKET,flashInstructions,loanBounds,compileSolTransaction,validateFlashPlan,type LoanState} from './solana-plan.ts';
 import {PUMP,rayPrograms,allowedPrograms,nativeOutputMinimum} from './solana-swaps.ts';
+import {resolveSolanaRpc} from './solana-rpc.ts';
 type Quote={out:bigint,pools:string[],data:any};
 type Venue={id:string,name:string,quote:(mint:string,amount:bigint)=>Promise<Quote>,build:(mint:string,amount:bigint,minOut:bigint,q:Quote,owner:PublicKey)=>Promise<{instructions:TransactionInstruction[],tables:AddressLookupTableAccount[]}>};
 let reserveAddress:string|undefined;
 const QUOTE_OWNER=new PublicKey('HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk');
-export function solConnection(c:SolConfig){return new Connection(c.rpc,{commitment:'confirmed',disableRetryOnRateLimit:true,httpAgent:false,fetch:(url,init)=>fetch(url,{...init,redirect:'manual',signal:AbortSignal.timeout(12000)})});}
+export function solConnection(c:SolConfig){return new Connection(resolveSolanaRpc(c),{commitment:'confirmed',disableRetryOnRateLimit:true,httpAgent:false,fetch:(url,init)=>fetch(url,{...init,redirect:'manual',signal:AbortSignal.timeout(12000)})});}
 function key(v:unknown,owner=false){try{const p=new PublicKey(String(v));if(p.equals(PublicKey.default)||owner&&!PublicKey.isOnCurve(p.toBytes()))throw Error();return p;}catch{throw Error('Invalid Solana wallet or token address.');}}
 async function chainCheck(c:Connection){if(await c.getGenesisHash()!==SOL_MAINNET_GENESIS)throw Error('RPC is not Solana mainnet.');const slot=await c.getSlot('confirmed'),at=await c.getBlockTime(slot);if(!at||Math.abs(Date.now()/1000-at)>60)throw Error('RPC is stale. Choose a current Solana mainnet endpoint.');return slot;}
 async function json(url:string,init?:RequestInit){const r=await fetch(url,{...init,redirect:'manual',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('Quote service unavailable (HTTP '+r.status+').');const text=await r.text();if(text.length>4000000)throw Error('Quote response exceeds size limits.');return JSON.parse(text);}

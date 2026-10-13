@@ -2,7 +2,7 @@
 
 Solidity 0.8.30 compilation and production Worker build pass. TypeScript checks pass.
 Local EVM tests cover atomic repayment, 98/2 profit splitting, preserving donated balances, clearing allowances, rejecting unauthorized callbacks/non-owner calls, refusing a lending pair used by the route, losing-route reverts and revoked routers.
-70 tests pass in total. A read-only BSC mainnet RPC check returned real direct pools and round-trip routes; below-limit ApeSwap pools were excluded. No live transaction was submitted.
+72 tests pass in total. A read-only BSC mainnet RPC check returned real direct pools and round-trip routes; below-limit ApeSwap pools were excluded. No live transaction was submitted.
 
 Pure/RPC tests cover configuration bounds, precision and repayment rounding, fee/gas profit floors, RPC response correlation, exact uncertain-intent recovery, canonical bytecode verification, both quote directions, lender separation and reserve-share rejection.
 
@@ -38,3 +38,7 @@ The new tests cover chain/mint/quote identity, Solana case sensitivity, timefram
 TypeScript checks and the production build are required for this update. Anchor 0.31's mixed ESM/CommonJS workspace export is routed through its official CommonJS entry for Worker bundling. The legacy Solidity artifact is unchanged. No funded seed, mainnet transaction, Solana flash-loan execution or browser interaction/visual QA was used. Browser QA is unavailable in this managed environment. Tests and builds do not prove a live route is profitable or constitute an independent audit.
 
 A read-only public DEX Screener check returned 9 BSC pools for 9 mints, 6 Arbitrum pools for 6 mints, and 29 Solana pools for 30 mints, with no failed discovery snapshots. These are fetched samples, not complete chain coverage or evidence of executable profit.
+
+## Hosted Solana RPC update
+
+Two additional tests verify canonical public-default replacement, custom endpoint preservation, invalid hosted endpoints, unchanged browser configuration and isolation of concurrent Worker request bindings. The supplied provider passed a read-only mainnet genesis, confirmed slot and current block-time check. Its API key is held only in a secret runtime binding and is excluded from source, exported ZIPs and client bundles. No transaction was signed or submitted.

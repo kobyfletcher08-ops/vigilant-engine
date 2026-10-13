@@ -1,5 +1,6 @@
 import handler from "vinext/server/fetch-handler";
 import { runWithConnectorBinding } from "../lib/connector-context";
+import { runWithSolanaRpc } from "../lib/solana-rpc";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 export default {
@@ -23,6 +24,7 @@ export default {
         },
       };
     }
-    return runWithConnectorBinding(binding, () => handler.fetch(request, env, ctx));
+    const rpc = (env as Cloudflare.Env & { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL;
+    return runWithSolanaRpc(rpc, () => runWithConnectorBinding(binding, () => handler.fetch(request, env, ctx)));
   },
 };

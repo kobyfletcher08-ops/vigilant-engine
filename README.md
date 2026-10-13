@@ -9,6 +9,10 @@ The default screen discovers real pools on Solana, BSC and Arbitrum One. Top Gai
 
 Displayed spreads are spot comparisons, not executable profits. BSC and Arbitrum quotes use the existing configured V2 routers and executor, include flash fees, the retained 2% developer fee and the gas budget, then require a fresh full transaction simulation. Unsupported pools remain visible for market tracking. Borrow limits can be configured above 100, including 1000, with the configured maximum, reserve-share cap and actual lender liquidity still enforced.
 
+### Hosted Solana RPC
+
+Set `SOLANA_RPC_URL` as a private server runtime environment variable to use an authenticated provider such as Alchemy. Do not put provider keys in source, browser code or the hosting manifest. When the client selects the public default (`https://api.mainnet-beta.solana.com`), the server uses this hosted endpoint if configured. An explicit custom RPC remains available in Solana settings. Without a hosted value, the public default continues to work. Request-scoped Worker bindings keep the provider credential on the server; local Node hosting can use the same environment variable.
+
 ### Solana execution and wallet
 
 Solana uses direct standard-SPL-token routes through Raydium and PumpSwap with two different pools. Kamino supplies wrapped SOL principal, both swaps run between one flash borrow and its matching repayment, and the final swap encodes a floor covering principal, flash fee, the configured network budget, retained new-account rent and minimum net profit. Pool formats, owner, reserve/vaults, signer count, blockhash lifetime, transaction size and allowed instructions are checked. Token-2022, other swap programs and multi-hop Raydium routes are currently tracking-only. There is no Solana developer fee.
