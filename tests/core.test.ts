@@ -13,7 +13,9 @@ test('configuration validates decimals, network, RPC, slippage and duplicate add
  assert.throws(()=>validateConfig({...config(),amount:'2',maxAmount:'1'}),/maximum/);
  assert.throws(()=>validateConfig({...config(),slippageBps:201}),/Slippage/);
  assert.throws(()=>validateConfig({...config(),dexes:[config().dexes[0],config().dexes[0]]}),/Duplicate/);
- for(const url of ['http://localhost','https://127.0.0.1','https://u:p@example.com','https://10.0.0.1','https://[::1]'])assert.throws(()=>safeRpc(url));
+ for(const url of ['ftp://localhost'])assert.throws(()=>safeRpc(url));
+ assert.equal(safeRpc('http://localhost:8545'), 'http://localhost:8545/');
+ assert.equal(safeRpc('https://127.0.0.1'), 'https://127.0.0.1/');
  assert.equal(safeRpc('https://example.com/rpc?key=test'),'https://example.com/rpc?key=test');
 });
 

@@ -4,12 +4,22 @@ import {walletRead,broadcastSigned} from '../../../lib/wallet-relay';
 import {discoverFactories,discoverPage} from '../../../lib/pair-discovery';
 import {validateConfig} from '../../../lib/model';
 import {configuredRpc} from '../../../lib/rpc';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+
 export const dynamic='force-dynamic';
+
 export async function POST(request:Request){
  if(!await getChatGPTUser())return Response.json({error:'Sign in to use your private trading console.'},{status:401});
  const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return Response.json({error:'Cross-origin requests are not allowed.'},{status:403});
  if(request.headers.get('content-type')!=='application/json')return Response.json({error:'JSON required.'},{status:415});
- try{const text=await request.text();if(text.length>48000)throw Error('Request exceeds the size limit.');const body=JSON.parse(text),config=validateConfig(body.config),rpc=configuredRpc(config);let result;
+ try{const text=await request.text();if(text.length>48000)throw Error('Request exceeds the size limit.');const body=JSON.parse(text),config=validateConfig(body.config);
+  let requestFetch = fetch;
+  if(config.proxy){
+    const dispatcher = new HttpsProxyAgent(config.proxy);
+    requestFetch = (url, options) => fetch(url, { ...options, dispatcher } as RequestInit);
+  }
+  const rpc=configuredRpc(config, requestFetch);
+  let result;
   if(body.action==='scan')result=await scan(config,rpc,body.assets);
   else if(body.action==='discover')result=await discoverFactories(config,rpc);
   else if(body.action==='pairs')result=await discoverPage(config,body.page,rpc);
