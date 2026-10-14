@@ -15,7 +15,7 @@ export async function POST(request:Request){
  try{const text=await request.text();if(text.length>48000)throw Error('Request exceeds the size limit.');const body=JSON.parse(text),config=validateConfig(body.config);
   let requestFetch = fetch;
   if(config.proxy){
-    const dispatcher = new HttpsProxyAgent(config.proxy);
+    const dispatcher = new HttpsProxyAgent(config.proxy, { keepAlive: true, maxSockets: 50 });
     requestFetch = (url, options) => fetch(url, { ...options, dispatcher } as RequestInit);
   }
   const rpc=configuredRpc(config, requestFetch);

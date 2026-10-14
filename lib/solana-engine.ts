@@ -1,3 +1,4 @@
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import {Connection,PublicKey,ComputeBudgetProgram,TransactionMessage,VersionedTransaction,type TransactionInstruction,type AddressLookupTableAccount} from '@solana/web3.js';
 import {TOKEN_PROGRAM_ID,getAssociatedTokenAddressSync,createAssociatedTokenAccountIdempotentInstruction,createCloseAccountInstruction,unpackMint,unpackAccount} from '@solana/spl-token';
 import {Reserve} from '@kamino-finance/klend-sdk/dist/@codegen/klend/accounts/Reserve.js';
@@ -12,7 +13,7 @@ type Quote={out:bigint,pools:string[],data:any};
 type Venue={id:string,name:string,quote:(mint:string,amount:bigint)=>Promise<Quote>,build:(mint:string,amount:bigint,minOut:bigint,q:Quote,owner:PublicKey)=>Promise<{instructions:TransactionInstruction[],tables:AddressLookupTableAccount[]}>};
 let reserveAddress:string|undefined;
 const QUOTE_OWNER=new PublicKey('HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk');
-export function solConnection(c:SolConfig){return new Connection(resolveSolanaRpc(c),{commitment:'confirmed',disableRetryOnRateLimit:true,httpAgent:false,fetch:(url,init)=>fetch(url,{...init,redirect:'manual',signal:AbortSignal.timeout(12000)})});}
+export function solConnection(c:SolConfig){return new Connection(resolveSolanaRpc(c),{commitment:'confirmed',disableRetryOnRateLimit:true,httpAgent:false,fetch:solFetch(c)});}
 function key(v:unknown,owner=false){try{const p=new PublicKey(String(v));if(p.equals(PublicKey.default)||owner&&!PublicKey.isOnCurve(p.toBytes()))throw Error();return p;}catch{throw Error('Invalid Solana wallet or token address.');}}
 async function chainCheck(c:Connection){if(await c.getGenesisHash()!==SOL_MAINNET_GENESIS)throw Error('RPC is not Solana mainnet.');const slot=await c.getSlot('confirmed'),at=await c.getBlockTime(slot);if(!at||Math.abs(Date.now()/1000-at)>60)throw Error('RPC is stale. Choose a current Solana mainnet endpoint.');return slot;}
 async function json(url:string,init?:RequestInit){const r=await fetch(url,{...init,redirect:'manual',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('Quote service unavailable (HTTP '+r.status+').');const text=await r.text();if(text.length>4000000)throw Error('Quote response exceeds size limits.');return JSON.parse(text);}
@@ -68,3 +69,13 @@ export async function solSimulate(v:unknown,unsigned:unknown,ownerValue:unknown,
 export async function solBroadcast(v:unknown,raw:unknown,ownerValue:unknown,lastValid:unknown){const config=validateSolConfig(v),c=solConnection(config),owner=key(ownerValue,true);await chainCheck(c);if(typeof raw!=='string'||raw.length>2000)throw Error('Invalid signed transaction.');const tx=VersionedTransaction.deserialize(Buffer.from(raw,'base64'));if(!nacl.sign.detached.verify(tx.message.serialize(),tx.signatures[0],owner.toBytes()))throw Error('Invalid wallet signature.');await validateTx(c,tx,config,owner,lastValid);const sim=await c.simulateTransaction(tx,{sigVerify:true,commitment:'confirmed'});if(sim.value.err)throw Error('Signed simulation failed before broadcast.');const signature=bs58.encode(tx.signatures[0]),returned=await c.sendRawTransaction(tx.serialize(),{skipPreflight:false,preflightCommitment:'confirmed',maxRetries:0});if(returned!==signature)throw Error('Unexpected RPC signature.');return {signature};}
 export async function solCheck(v:unknown,ownerValue:unknown){const config=validateSolConfig(v),c=solConnection(config),slot=await chainCheck(c);return {slot,balance:ownerValue?solDecimal(BigInt(await c.getBalance(key(ownerValue,true)))):null};}
 export async function solStatuses(v:unknown,items:unknown){const c=solConnection(validateSolConfig(v));await chainCheck(c);if(!Array.isArray(items)||items.length>20||items.some(i=>typeof i.signature!=='string'||!/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(i.signature)||!Number.isSafeInteger(i.lastValidBlockHeight)))throw Error('Invalid signature list.');const rows=await c.getSignatureStatuses(items.map(i=>i.signature),{searchTransactionHistory:true}),height=await c.getBlockHeight('confirmed');return items.map((item,i)=>{const s=rows.value[i];return {signature:item.signature,status:s?.err?'failed':s?.confirmationStatus==='confirmed'||s?.confirmationStatus==='finalized'?'confirmed':s?'pending':height>item.lastValidBlockHeight?'expired':'unknown'};});}
+
+export function solFetch(c: SolConfig) {
+  return (url: RequestInfo | URL, init?: RequestInit) => {
+    const options: RequestInit = { ...init, redirect: 'manual', signal: AbortSignal.timeout(12000) };
+    if (c.proxy) {
+      options.dispatcher = new HttpsProxyAgent(c.proxy, { keepAlive: true, maxSockets: 50 });
+    }
+    return fetch(url, options);
+  };
+}
