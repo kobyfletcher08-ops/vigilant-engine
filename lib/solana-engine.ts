@@ -1,51 +1,44 @@
-import {PublicKey,Connection,TransactionInstruction,VersionedTransaction,TransactionMessage,ComputeBudgetProgram} from '@solana/web3.js';
-import {getAssociatedTokenAddressSync,createAssociatedTokenAccountIdempotentInstruction,createCloseAccountInstruction,unpackAccount,TOKEN_PROGRAM_ID} from '@solana/spl-token';
-import {rayVenue,pumpVenue} from './solana-plan';
-import {lender,loanBounds,flashInstructions,validateFlashPlan,nativeOutputMinimum,solDecimal,solUnits,allowedPrograms,KAMINO_PROGRAM} from './solana-math';
-import {tokenPairs} from './market-feed';
-import nacl from 'tweetnacl';
-import bs58 from 'bs58';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-export type SolConfig={rpc:string,proxy?:string,amount:string,maxAmount:string,minProfit:string,gasBudget:string,slippageBps:number,priorityFee:number,lookupTables:string[]};
-export type SolLoan={address:string,supplyVault:string,feeVault:string,feeSf:bigint,available:bigint};
-export type SolRoute={id:string,token:string,symbol:string,buy:string,sell:string,buyPool:string,sellPool:string,amount:string,minAssetOut:string,output:string,repayment:string,fee:string,net:string,profitable:boolean,slot:number,at:number};
-export type SolReport={routes:SolRoute[],notes:string[],slot:number,at:number,loanAvailable:string};
-export type SolPreview={unsigned:string,owner:string,expires:number,blockhash:string,lastValidBlockHeight:number,route:SolRoute,fee:string,rent:string,minimumNet:string,units:number};
-export type Quote={pools:string[],out:bigint,buyPath?:any[],sellPath?:any[]};
-export type Venue={name:string,id:string,quote:(mint:string,amount:bigint)=>Promise<Quote>,build:(mint:string,amount:bigint,minOut:bigint,q:Quote,owner:PublicKey)=>Promise<{instructions:TransactionInstruction[],tables:PublicKey[]}>};
-const WSOL='So11111111111111111111111111111111111111112';
-function key(value:unknown,signer=false){try{const k=new PublicKey(String(value));if(signer&&!PublicKey.isOnCurve(k))throw Error();return k;}catch{throw Error('Invalid wallet address.');}}
-export function validateSolConfig(value:unknown):SolConfig{
- if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Configuration must be an object.');const c=value as SolConfig;
- let u:URL;try{u=new URL(String(c.rpc));}catch{throw Error('Enter a valid RPC URL.');}if(!['http:','https:'].includes(u.protocol))throw Error('Use an HTTP or HTTPS RPC URL.');
- let p=undefined;if(c.proxy){try{const pu=new URL(String(c.proxy));if(!['http:','https:'].includes(pu.protocol))throw Error();p=pu.toString();}catch{throw Error('Use an HTTP or HTTPS proxy URL.');}}
- const num=(v:unknown,name:string,max:number,places=9)=>{if(typeof v!=='string'||!/^\d+(\.\d+)?$/.test(v))throw Error(name+' must be a decimal.');const p=v.split('.')[1]?.length||0;if(p>places)throw Error(name+' must not exceed '+places+' decimal places.');const f=parseFloat(v);if(f<=0||f>max)throw Error(name+' must be 0–'+max+'.');return v;};
- const size=solUnits(num(c.amount,'Trade size',1000)),max=solUnits(num(c.maxAmount,'Maximum size',1000));if(size>max)throw Error('Trade size must be within the maximum.');
- num(c.minProfit,'Minimum net profit',1000);num(c.gasBudget,'Gas budget',0.5);
- const int=(v:unknown,label:string,min:number,max:number)=>{if(!Number.isInteger(v)||Number(v)<min||Number(v)>max)throw Error(`${label} must be ${min}–${max}.`);return Number(v);};
- if(!Array.isArray(c.lookupTables)||c.lookupTables.length>10||c.lookupTables.some(t=>typeof t!=='string'||!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t)))throw Error('Configure up to 10 valid lookup table addresses.');
- return {rpc:u.toString(),proxy:p,amount:c.amount,maxAmount:c.maxAmount,minProfit:c.minProfit,gasBudget:c.gasBudget,slippageBps:int(c.slippageBps,'Slippage (bps)',1,1000),priorityFee:int(c.priorityFee,'Priority fee (microLamports)',0,1000000000),lookupTables:c.lookupTables.slice()};
+import {Connection,PublicKey,ComputeBudgetProgram,TransactionMessage,VersionedTransaction,type TransactionInstruction,type AddressLookupTableAccount} from '@solana/web3.js';
+import {TOKEN_PROGRAM_ID,getAssociatedTokenAddressSync,createAssociatedTokenAccountIdempotentInstruction,createCloseAccountInstruction,unpackMint,unpackAccount} from '@solana/spl-token';
+import {Reserve} from '@kamino-finance/klend-sdk/dist/@codegen/klend/accounts/Reserve.js';
+import BN from 'bn.js';
+import bs58 from 'bs58';
+import nacl from 'tweetnacl';
+import {tokenPairs} from './market-feed.ts';
+import {WSOL,SOL_MAINNET_GENESIS,validateSolConfig,solUnits,solDecimal,type SolConfig,type SolReport,type SolRoute,type SolPreview} from './solana-types.ts';
+import {KAMINO_PROGRAM,KAMINO_MARKET,flashInstructions,loanBounds,compileSolTransaction,validateFlashPlan,type LoanState} from './solana-plan.ts';
+import {PUMP,rayPrograms,allowedPrograms,nativeOutputMinimum} from './solana-swaps.ts';
+type Quote={out:bigint,pools:string[],data:any};
+type Venue={id:string,name:string,quote:(mint:string,amount:bigint)=>Promise<Quote>,build:(mint:string,amount:bigint,minOut:bigint,q:Quote,owner:PublicKey)=>Promise<{instructions:TransactionInstruction[],tables:AddressLookupTableAccount[]}>};
+let reserveAddress:string|undefined;
+const QUOTE_OWNER=new PublicKey('HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk');
+export function solConnection(c:SolConfig){return new Connection(resolveSolanaRpc(c),{commitment:'confirmed',disableRetryOnRateLimit:true,httpAgent:false,fetch:solFetch(c)});}
+function key(v:unknown,owner=false){try{const p=new PublicKey(String(v));if(p.equals(PublicKey.default)||owner&&!PublicKey.isOnCurve(p.toBytes()))throw Error();return p;}catch{throw Error('Invalid Solana wallet or token address.');}}
+async function chainCheck(c:Connection){if(await c.getGenesisHash()!==SOL_MAINNET_GENESIS)throw Error('RPC is not Solana mainnet.');const slot=await c.getSlot('confirmed'),at=await c.getBlockTime(slot);if(!at||Math.abs(Date.now()/1000-at)>60)throw Error('RPC is stale. Choose a current Solana mainnet endpoint.');return slot;}
+async function json(url:string,init?:RequestInit){const r=await fetch(url,{...init,redirect:'manual',signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('Quote service unavailable (HTTP '+r.status+').');const text=await r.text();if(text.length>4000000)throw Error('Quote response exceeds size limits.');return JSON.parse(text);}
+async function lender(c:Connection,borrow:bigint):Promise<LoanState>{
+ if(!reserveAddress){const data=await json('https://api.kamino.finance/kamino-market/reserves/account-data?markets='+KAMINO_MARKET.toBase58());for(const market of Array.isArray(data)?data:[])for(const r of market.reserves||[]){try{const state=Reserve.decode(Buffer.from(r.data,'base64'));if(String(state.liquidity.mintPubkey)===WSOL&&String(state.lendingMarket)===KAMINO_MARKET.toBase58()){reserveAddress=r.pubkey;break;}}catch{}}}
+ if(!reserveAddress)throw Error('SOL flash-loan reserve could not be discovered.');const address=new PublicKey(reserveAddress),account=await c.getAccountInfo(address);if(!account?.owner.equals(KAMINO_PROGRAM))throw Error('Unexpected flash-loan reserve owner.');const state=Reserve.decode(account.data),feeSf=BigInt(state.config.fees.flashLoanFeeSf.toString());
+ if(String(state.lendingMarket)!==KAMINO_MARKET.toBase58()||String(state.liquidity.mintPubkey)!==WSOL||String(state.liquidity.tokenProgram)!==TOKEN_PROGRAM_ID.toBase58()||Number(state.config.status)!==0||feeSf===(1n<<64n)-1n)throw Error('SOL flash loans are unavailable in this reserve.');
+ const info=await c.getAccountInfo(new PublicKey(state.liquidity.supplyVault));if(!info)throw Error('Lender vault is unavailable.');const vault=unpackAccount(new PublicKey(state.liquidity.supplyVault),info,TOKEN_PROGRAM_ID);if(vault.mint.toBase58()!==WSOL)throw Error('Unexpected lending mint.');const recorded=BigInt(state.liquidity.totalAvailableAmount.toString()),available=vault.amount<recorded?vault.amount:recorded;if(borrow>available)throw Error('Loan exceeds available SOL flash-loan liquidity.');
+ return {address:address.toBase58(),market:KAMINO_MARKET.toBase58(),mint:WSOL,supplyVault:String(state.liquidity.supplyVault),feeVault:String(state.liquidity.feeVault),feeSf,available};
 }
-export function solFetch(c:SolConfig){
-    return (url:RequestInfo|URL,init?:RequestInit)=>{
-        const options:RequestInit={...init,redirect:'manual',signal:AbortSignal.timeout(12000)};
-        if(c.proxy)options.dispatcher=new HttpsProxyAgent(c.proxy);
-        return fetch(url,options);
-    };
+async function lookupTables(c:Connection,addresses:string[]){const result:AddressLookupTableAccount[]=[];for(const address of [...new Set(addresses)].slice(0,10)){const table=(await c.getAddressLookupTable(new PublicKey(address))).value;if(!table?.isActive())throw Error('A configured route lookup table is unavailable.');result.push(table);}return result;}
+async function pumpVenue(c:Connection,poolAddress:string,token:PublicKey,owner:PublicKey):Promise<Venue>{
+ const account=await c.getAccountInfo(new PublicKey(poolAddress));if(!account?.owner.equals(PUMP))throw Error('Unsupported PumpSwap pool owner.');const sdk=await import('@pump-fun/pump-swap-sdk'),state=await new sdk.OnlinePumpAmmSdk(c).swapSolanaState(new PublicKey(poolAddress),owner);
+ if(!state.pool.baseMint.equals(token)||state.pool.quoteMint.toBase58()!==WSOL)throw Error('PumpSwap mint mismatch.');
+ const args:any={globalConfig:state.globalConfig,feeConfig:state.feeConfig,baseReserve:state.poolBaseAmount,quoteReserve:state.poolQuoteAmount,virtualQuoteReserves:state.pool.virtualQuoteReserves,baseMintAccount:state.baseMintAccount,baseMint:state.baseMint,coinCreator:state.pool.coinCreator,creator:state.pool.creator,quoteMint:state.pool.quoteMint,isMayhemMode:state.pool.isMayhemMode,creatorFeeBps:state.pool.creatorFeeBps,slippage:0};
+ return {id:poolAddress,name:'PumpSwap',quote:async(mint,amount)=>{const q=mint===WSOL?sdk.buyQuoteInput({...args,quote:new BN(amount.toString())}):sdk.sellBaseInput({...args,base:new BN(amount.toString())});return {out:BigInt(('base'in q?q.base:q.uiQuote).toString()),pools:[poolAddress],data:q};},build:async(mint,amount,minOut,_q)=>{const raw=mint===WSOL?await sdk.PUMP_AMM_SDK.buyInstructions(state,new BN(minOut.toString()),new BN(amount.toString())):await sdk.PUMP_AMM_SDK.sellInstructions(state,new BN(amount.toString()),new BN(minOut.toString()));const instructions=raw.filter(ix=>ix.programId.equals(PUMP));if(instructions.length!==1)throw Error('Unsupported PumpSwap builder format.');return {instructions,tables:[]};}};
 }
-export function solConnection(c:SolConfig){return new Connection(c.rpc,{commitment:'confirmed',disableRetryOnRateLimit:true,httpAgent:false,fetch:solFetch(c)});}
-async function chainCheck(c:Connection){const height=await c.getSlot('confirmed');if(height<100000000)throw Error('RPC is connected to a different network.');return height;}
-const lookupCache=new Map<string,{expires:number,promise:Promise<PublicKey[]>}>();
-async function lookupTables(c:Connection,addresses:string[]){
- const resolve=async(address:string)=>{const acc=await c.getAddressLookupTable(new PublicKey(address));if(acc.value)return acc.value.state.addresses;throw Error('Lookup table not found.');};
- return(await Promise.all(addresses.map(async address=>{const found=lookupCache.get(address);if(found&&found.expires>Date.now())return found.promise;if(lookupCache.size>100)lookupCache.clear();
-  const promise=resolve(address).catch(e=>{lookupCache.delete(address);throw e;});lookupCache.set(address,{expires:Date.now()+180000,promise});return promise;}))).flat();
-}
-async function load(configValue:unknown,tokenValue:unknown,symbolValue:unknown,ownerValue?:unknown){
- const config=validateSolConfig(configValue),c=solConnection(config),token=key(tokenValue),owner=ownerValue?key(ownerValue,true):null,borrow=solUnits(config.amount);
- if(token.toBase58()===WSOL)throw Error('Enter a token other than SOL.');
- const slot=await chainCheck(c),loan=await lender(c,borrow),at=Date.now();
- const pairs=(await tokenPairs('solana',token.toBase58(),solFetch(config))).filter(p=>[p.base.address,p.quote.address].includes(WSOL)&&p.liquidity>=1000).sort((a,b)=>b.liquidity-a.liquidity),venues:Venue[]=[],notes:string[]=[];
+function rayVenue(c:Connection,token:PublicKey):Venue{return {id:'raydium',name:'Raydium',quote:async(mint,amount)=>{const outputMint=mint===WSOL?token.toBase58():WSOL,q=await json('https://transaction-v1.raydium.io/compute/swap-base-in?'+new URLSearchParams({inputMint:mint,outputMint,amount:amount.toString(),slippageBps:'0',txVersion:'V0'}));
+ if(!q.success||q.data?.inputMint!==mint||q.data?.outputMint!==outputMint||BigInt(q.data.inputAmount)!==amount||q.data.routePlan?.length!==1)throw Error('No supported direct Raydium quote at this size.');return {out:BigInt(q.data.outputAmount),pools:q.data.routePlan.map((p:any)=>String(p.poolId)),data:q};},build:async(mint,_amount,minOut,q,owner)=>{
+ const response=structuredClone(q.data);response.data.otherAmountThreshold=minOut.toString();const outputMint=mint===WSOL?token.toBase58():WSOL,built=await json('https://transaction-v1.raydium.io/transaction/swap-base-in',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({wallet:owner.toBase58(),swapResponse:response,txVersion:'V0',computeUnitPriceMicroLamports:'0',wrapSol:false,unwrapSol:false,inputAccount:getAssociatedTokenAddressSync(new PublicKey(mint),owner).toBase58(),outputAccount:getAssociatedTokenAddressSync(new PublicKey(outputMint),owner).toBase58()})});
+ if(!built.success||!Array.isArray(built.data)||built.data.length!==1)throw Error('Raydium could not build a single atomic route.');const tx=VersionedTransaction.deserialize(Buffer.from(built.data[0].transaction,'base64'));if(tx.message.header.numRequiredSignatures!==1||!tx.message.staticAccountKeys[0].equals(owner))throw Error('Unexpected Raydium transaction signer.');const tables=await lookupTables(c,'addressTableLookups'in tx.message?tx.message.addressTableLookups.map(l=>l.accountKey.toBase58()):[]),instructions=TransactionMessage.decompile(tx.message,{addressLookupTableAccounts:tables}).instructions.filter(ix=>rayPrograms.some(p=>p.equals(ix.programId)));if(instructions.length!==1)throw Error('Unsupported Raydium instruction layout.');return {instructions,tables};
+ }};}
+async function load(v:unknown,tokenValue:unknown,symbolValue:unknown,owner=QUOTE_OWNER){
+ const config=validateSolConfig(v),c=solConnection(config),at=Date.now(),slot=await chainCheck(c),token=key(tokenValue);if(token.toBase58()===WSOL)throw Error('Choose an intermediate token.');const borrow=solUnits(config.amount),loan=await lender(c,borrow),info=await c.getAccountInfo(token);if(!info?.owner.equals(TOKEN_PROGRAM_ID))throw Error('Solana execution currently supports standard SPL tokens. Other pools remain available for market tracking.');unpackMint(token,info,TOKEN_PROGRAM_ID);
+ const pairs=(await tokenPairs('solana',token.toBase58())).filter(p=>[p.base.address,p.quote.address].includes(WSOL)&&p.liquidity>=1000).sort((a,b)=>b.liquidity-a.liquidity),venues:Venue[]=[],notes:string[]=[];
  if(pairs.some(p=>p.dex==='raydium'))venues.push(rayVenue(c,token));for(const p of pairs.filter(p=>p.dex==='pumpswap').slice(0,2)){try{venues.push(await pumpVenue(c,p.id,token,owner));}catch{notes.push('PumpSwap '+p.id.slice(0,8)+': pool data unavailable.');}}
  const routes:SolRoute[]=[],details=new Map<string,{buy:Venue,sell:Venue,bq:Quote,sq:Quote}>();
  for(const buy of venues){let bq:Quote;try{bq=await buy.quote(WSOL,borrow);}catch{notes.push(buy.name+': buy quote unavailable at this size.');continue;}const asset=bq.out*BigInt(10000-config.slippageBps)/10000n;if(!asset)continue;
@@ -66,9 +59,6 @@ export async function solPrepare(v:unknown,token:unknown,symbol:unknown,routeId:
  if(fee.value===null||BigInt(fee.value)>solUnits(l.config.gasBudget))throw Error('Network fee exceeds budget.');if(BigInt(await l.c.getBalance(owner))<BigInt(fee.value)+cash)throw Error('The wallet needs native SOL for fees and token-account rent. Kamino supplies the loan principal.');const sim=await l.c.simulateTransaction(tx,{sigVerify:false,commitment:'confirmed'});if(sim.value.err)throw Error('Atomic flash-loan simulation failed: '+JSON.stringify(sim.value.err).slice(0,150));
  return {unsigned:Buffer.from(tx.serialize()).toString('base64'),owner:owner.toBase58(),expires:Date.now()+30000,blockhash:latest.blockhash,lastValidBlockHeight:latest.lastValidBlockHeight,route,fee:solDecimal(BigInt(fee.value)),rent:solDecimal(rent),minimumNet:l.config.minProfit,units:sim.value.unitsConsumed||0};
 }
-function compileSolTransaction(owner:PublicKey,blockhash:string,instructions:TransactionInstruction[],tables:PublicKey[]){
- const msg=new TransactionMessage({payerKey:owner,recentBlockhash:blockhash,instructions}).compileToV0Message();return new VersionedTransaction(msg);
-}
 async function validateTx(c:Connection,tx:VersionedTransaction,config:SolConfig,owner:PublicKey,lastValid:unknown){
  if(tx.message.header.numRequiredSignatures!==1||!tx.message.staticAccountKeys[0].equals(owner)||!Number.isSafeInteger(lastValid))throw Error('Invalid transaction owner or lifetime.');if(await c.getBlockHeight('confirmed')>Number(lastValid))throw Error('Transaction expired. Prepare again.');
  const tables=await lookupTables(c,'addressTableLookups'in tx.message?tx.message.addressTableLookups.map(t=>t.accountKey.toBase58()):[]),instructions=TransactionMessage.decompile(tx.message,{addressLookupTableAccounts:tables}).instructions,borrowIx=instructions.find(ix=>ix.programId.equals(KAMINO_PROGRAM));if(!borrowIx||borrowIx.data.length<16)throw Error('Missing flash borrow.');const borrow=borrowIx.data.readBigUInt64LE(8);if(borrow!==solUnits(config.amount))throw Error('Flash-loan size changed.');const loan=await lender(c,borrow);let rent=0n;
@@ -79,3 +69,13 @@ export async function solSimulate(v:unknown,unsigned:unknown,ownerValue:unknown,
 export async function solBroadcast(v:unknown,raw:unknown,ownerValue:unknown,lastValid:unknown){const config=validateSolConfig(v),c=solConnection(config),owner=key(ownerValue,true);await chainCheck(c);if(typeof raw!=='string'||raw.length>2000)throw Error('Invalid signed transaction.');const tx=VersionedTransaction.deserialize(Buffer.from(raw,'base64'));if(!nacl.sign.detached.verify(tx.message.serialize(),tx.signatures[0],owner.toBytes()))throw Error('Invalid wallet signature.');await validateTx(c,tx,config,owner,lastValid);const sim=await c.simulateTransaction(tx,{sigVerify:true,commitment:'confirmed'});if(sim.value.err)throw Error('Signed simulation failed before broadcast.');const signature=bs58.encode(tx.signatures[0]),returned=await c.sendRawTransaction(tx.serialize(),{skipPreflight:false,preflightCommitment:'confirmed',maxRetries:0});if(returned!==signature)throw Error('Unexpected RPC signature.');return {signature};}
 export async function solCheck(v:unknown,ownerValue:unknown){const config=validateSolConfig(v),c=solConnection(config),slot=await chainCheck(c);return {slot,balance:ownerValue?solDecimal(BigInt(await c.getBalance(key(ownerValue,true)))):null};}
 export async function solStatuses(v:unknown,items:unknown){const c=solConnection(validateSolConfig(v));await chainCheck(c);if(!Array.isArray(items)||items.length>20||items.some(i=>typeof i.signature!=='string'||!/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(i.signature)||!Number.isSafeInteger(i.lastValidBlockHeight)))throw Error('Invalid signature list.');const rows=await c.getSignatureStatuses(items.map(i=>i.signature),{searchTransactionHistory:true}),height=await c.getBlockHeight('confirmed');return items.map((item,i)=>{const s=rows.value[i];return {signature:item.signature,status:s?.err?'failed':s?.confirmationStatus==='confirmed'||s?.confirmationStatus==='finalized'?'confirmed':s?'pending':height>item.lastValidBlockHeight?'expired':'unknown'};});}
+
+export function solFetch(c: SolConfig) {
+  return (url: RequestInfo | URL, init?: RequestInit) => {
+    const options: RequestInit = { ...init, redirect: 'manual', signal: AbortSignal.timeout(12000) };
+    if (c.proxy) {
+      options.dispatcher = new HttpsProxyAgent(c.proxy, { keepAlive: true, maxSockets: 50 });
+    }
+    return fetch(url, options);
+  };
+}
