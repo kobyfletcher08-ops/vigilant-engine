@@ -2,7 +2,9 @@
 
 The desktop package includes the full interface, Node runtime and API backend. It runs locally without Render, Cloudflare, a separate Node installation or a ChatGPT sign-in. Internet access is needed for market data and blockchain RPCs.
 
-Download `VigilantEngine-0.2.0-Windows-x64.exe` from the Windows desktop workflow artifact. Open it on Windows 10/11 x64. The portable EXE keeps its application data in `VigilantEngine-Data` next to the EXE; keep that directory when updating. The ZIP contains the same application as an unpacked folder and uses the normal Windows user-data directory. Both builds are unsigned.
+Download `VigilantEngine-0.2.1-Windows-x64.exe` from the GitHub release. Open it on Windows 10/11 x64. The portable EXE keeps its application data in `VigilantEngine-Data` next to the EXE; keep that directory when updating. The ZIP contains the same application as an unpacked folder; extract it and run `VigilantEngine.exe`. It uses the normal Windows user-data directory. Both builds are unsigned.
+
+Version 0.2.1 fixes the `Origin required` / `Unexpected token O` error when the desktop interface calls its backend. Origin checks use Electron's trusted Chromium initiator, including when the optional HTTP Origin header is absent. The Windows startup check now exercises POST requests to all three APIs from the actual renderer.
 
 Use Settings for your BSC/Arbitrum RPC and proxy. Solana has its own settings under DEX Screener → Solana. Proxies accept `hostname:port:login:password`, `https://hostname:port:login:password`, or `http(s)://login:password@hostname:port`. Requests use real CONNECT tunneling and reused connections; proxy errors never silently fall back to a direct connection. Credentials are removed from exported configuration backups.
 

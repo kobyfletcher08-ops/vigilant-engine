@@ -2,7 +2,8 @@
 const {app,BrowserWindow,session,Menu,shell,dialog} = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
-const {APP_ORIGIN,isLocal,safeExternal,safeAsset} = require('./policy.cjs');
+const {APP_ORIGIN,isLocal,trustedApiRequest,safeExternal,safeAsset} = require('./policy.cjs');
+const failure = (error,status) => Response.json({error},{status,headers:{'cache-control':'no-store'}});
 const smoke = process.argv.includes('--smoke-desktop');
 const dataDirectory=smoke?path.join(require('node:os').tmpdir(),'vigilant-smoke-'+process.pid):process.env.PORTABLE_EXECUTABLE_DIR?path.join(process.env.PORTABLE_EXECUTABLE_DIR,'VigilantEngine-Data'):null;
 if(dataDirectory){require('node:fs').mkdirSync(dataDirectory,{recursive:true});app.setPath('userData',dataDirectory);}
@@ -17,16 +18,16 @@ else {
     browser.setPermissionCheckHandler(()=>false);
     const contentPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'self'";
     browser.protocol.handle('https',async request=>{
-      if (!isLocal(request.url) || request.initiatorOrigin && request.initiatorOrigin !== APP_ORIGIN) return new Response('Blocked origin',{status:403});
+      if (!isLocal(request.url) || request.initiatorOrigin !== undefined && request.initiatorOrigin !== APP_ORIGIN) return failure('Blocked request origin.',403);
       const origin = request.headers.get('origin');
-      if (origin && origin !== APP_ORIGIN) return new Response('Blocked origin',{status:403});
+      if (origin !== null && origin !== APP_ORIGIN) return failure('Blocked request origin.',403);
       const url = new URL(request.url);
       if (url.pathname.startsWith('/api/')) {
-        if (request.method === 'POST' && origin !== APP_ORIGIN) return new Response('Origin required',{status:403});
-        if (request.method !== 'POST' && request.method !== 'GET') return new Response('Method not allowed',{status:405});
+        if (!trustedApiRequest(request)) return failure('Invalid desktop request origin.',403);
+        if (request.method !== 'POST' && request.method !== 'GET') return failure('Method not allowed.',405);
         const headers = new Headers(request.headers); headers.set('origin',APP_ORIGIN);
         let body;
-        if (request.method === 'POST') { body = await request.text(); if (body.length > 64000) return new Response('Request too large',{status:413}); }
+        if (request.method === 'POST') { body = await request.text(); if (body.length > 64000) return failure('Request too large.',413); }
         return backend.dispatch(new Request(request.url,{method:request.method,headers,body}));
       }
       if (!['GET','HEAD'].includes(request.method)) return new Response('Method not allowed',{status:405});
@@ -46,7 +47,18 @@ else {
     await window.loadURL(APP_ORIGIN+'/');
     if (!smoke) window.show();
     else {
-      const ok = await window.webContents.executeJavaScript(`(async()=>{await new Promise(r=>setTimeout(r,2500));const h=await fetch('/api/desktop/health').then(r=>r.json());return document.querySelector('main')!==null&&document.querySelectorAll('button').length>10&&h.runtime==='local-desktop'&&window.isSecureContext&&typeof window.require==='undefined';})()`);
+      const report = await window.webContents.executeJavaScript(`(async()=>{
+        await new Promise(r=>setTimeout(r,2500));
+        const health=await fetch('/api/desktop/health').then(r=>r.json()),posts=[];
+        for(const route of ['arb','markets','solana']){
+          const response=await fetch('/api/'+route,{method:'POST',referrerPolicy:'no-referrer',headers:{'content-type':'application/json'},body:'{}'});
+          const text=await response.text();let data;try{data=JSON.parse(text);}catch{}
+          posts.push({route,status:response.status,error:data?.error||text.slice(0,100)});
+        }
+        return {ui:document.querySelector('main')!==null&&document.querySelectorAll('button').length>10,health:health.runtime,secure:window.isSecureContext,isolated:typeof window.require==='undefined',posts};
+      })()`);
+      console.log('DESKTOP_SMOKE_REPORT '+JSON.stringify(report));
+      const ok=report.ui&&report.health==='local-desktop'&&report.secure&&report.isolated&&report.posts.length===3&&report.posts.every(p=>p.status===400&&typeof p.error==='string'&&p.error.length>0);
       console.log('DESKTOP_SMOKE '+(ok?'PASS':'FAIL')); app.exit(ok?0:1);
     }
   }).catch(error=>{console.error('Desktop startup failed:',error.message);if(!smoke)dialog.showErrorBox('Vigilant Engine could not start','The local application failed to start. Download a fresh copy of the Windows package.');app.exit(1);});

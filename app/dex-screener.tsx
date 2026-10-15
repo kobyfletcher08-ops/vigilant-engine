@@ -5,12 +5,13 @@ import {MARKET_CHAINS,validMint,mintKey,dedupePairs,rankedPairs,opportunities,in
 import type {Config} from '../lib/model';
 import type {Scan,Route} from '../lib/engine';
 import SolanaDesk from './solana-desk';
+import {apiResult} from '../lib/api-response';
 const storageKey='dex-arb-market-settings-v1';
 const usd=(v:number)=>v?new Intl.NumberFormat('en-GB',{style:'currency',currency:'USD',maximumFractionDigits:v<1?8:2,notation:v>=1000000?'compact':'standard'}).format(v):'—';
 const pct=(v:number|undefined)=>v===undefined?'—':(v>=0?'+':'')+v.toFixed(2)+'%';
 const short=(v:string)=>v.slice(0,6)+'…'+v.slice(-4);
 const cell=(v:unknown)=>'"'+String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
-async function request(action:string,chain:MarketChain,other:Record<string,unknown>={},signal?:AbortSignal){const res=await fetch('/api/markets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,chain,...other}),signal}),data:any=await res.json();if(!res.ok)throw Error(data.error||'Market request failed.');return data.result;}
+async function request(action:string,chain:MarketChain,other:Record<string,unknown>={},signal?:AbortSignal){const res=await fetch('/api/markets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,chain,...other}),signal});return apiResult(res,'Market request failed.');}
 export default function DexScreener({chain,onChain,active,config,onQuote,onExecute,onWallet,onSettings}:{chain:MarketChain,onChain:(chain:MarketChain)=>void,active:boolean,config:Config,onQuote:(pair:Pair)=>Promise<Scan>,onExecute:(route:Route)=>void,onWallet:()=>void,onSettings:()=>void}){
  const [feed,setFeed]=useState<MarketFeed|null>(null),[ready,setReady]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[live,setLive]=useState(true),[interval,setIntervalSeconds]=useState(5),[frame,setFrame]=useState<Timeframe>('h24'),[mode,setMode]=useState<'gainers'|'volume'|'liquidity'>('gainers'),[minLiquidity,setMinLiquidity]=useState(25000),[minVolume,setMinVolume]=useState(5000),[minSpread,setMinSpread]=useState(2),[activeOnly,setActiveOnly]=useState(true),[query,setQuery]=useState(''),[results,setResults]=useState<Pair[]|null>(null),[searching,setSearching]=useState(false),[selected,setSelected]=useState<Pair|null>(null),[quote,setQuote]=useState<Scan|null>(null),[quoting,setQuoting]=useState(false),[tick,setTick]=useState(Date.now()),[trail,setTrail]=useState<{at:number,price:number}[]>([]),[watch,setWatch]=useState<Record<MarketChain,string[]>>({bsc:[],arbitrum:[],solana:[]});
  const controller=useRef<AbortController|null>(null),working=useRef(false),generation=useRef(0),inspection=useRef(0),alive=useRef(true),current=useRef(chain),watchRef=useRef(watch),selectedRef=useRef(selected);current.current=chain;watchRef.current=watch;selectedRef.current=selected;

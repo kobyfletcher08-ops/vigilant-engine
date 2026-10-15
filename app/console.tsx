@@ -11,6 +11,7 @@ import RpcSettingsPanel from './rpc-settings';
 import {LocalSigner} from '../lib/browser-wallet';
 import DexScreener from './dex-screener';
 import {MARKET_CHAINS,intermediate,type MarketChain,type Pair} from '../lib/dexscreener';
+import {apiResult} from '../lib/api-response';
 
 type Provider={request:(args:{method:string,params?:any[]})=>Promise<any>,on?:(event:string,fn:(args:any)=>void)=>void,removeListener?:(event:string,fn:(args:any)=>void)=>void,isMetaMask?:boolean,providers?:Provider[]};
 type Tx={id:string,hash?:string,network:NetworkId,owner:string,kind:string,createdAt:string,status:string,transaction:any,cost:string,contract?:string,receipt?:any};
@@ -22,7 +23,7 @@ const short=(x?:string)=>x?x.slice(0,6)+'…'+x.slice(-4):'Not connected';
 const fmt=(value?:string|number,digits=6)=>value===undefined?'—':Number(value).toLocaleString('en-GB',{maximumFractionDigits:digits});
 const equal=(a:string,b:string)=>a?.toLowerCase()===b?.toLowerCase();
 const csv=(x:unknown)=>'"'+String(x??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
-async function api(action:string,config:Config,other:any={},signal?:AbortSignal){const res=await fetch('/api/arb',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,config,...other}),signal});const json:any=await res.json();if(!res.ok)throw Error(json.error||'Request failed.');return json.result;}
+async function api(action:string,config:Config,other:any={},signal?:AbortSignal){const res=await fetch('/api/arb',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,config,...other}),signal});return apiResult(res);}
 function download(name:string,text:string,type='application/json'){const url=URL.createObjectURL(new Blob([text],{type})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
 export default function Console(){

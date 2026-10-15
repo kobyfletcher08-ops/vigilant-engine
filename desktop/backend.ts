@@ -10,7 +10,7 @@ const routes: Record<string,(request:Request)=>Promise<Response>> = {'/api/arb':
 export async function dispatch(request:Request):Promise<Response> {
   const url = new URL(request.url);
   if (url.origin !== APP_ORIGIN || request.headers.get('origin') !== APP_ORIGIN) return Response.json({error:'Invalid desktop origin.'},{status:403});
-  if (url.pathname === '/api/desktop/health' && request.method === 'GET') return Response.json({version:'0.2.0',runtime:'local-desktop',network:transportStats()});
+  if (url.pathname === '/api/desktop/health' && request.method === 'GET') return Response.json({version:'0.2.1',runtime:'local-desktop',network:transportStats()});
   const route = routes[url.pathname];
   if (!route) return Response.json({error:'Unknown desktop endpoint.'},{status:404});
   if (request.method !== 'POST') return Response.json({error:'POST required.'},{status:405});

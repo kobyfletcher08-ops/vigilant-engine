@@ -8,11 +8,12 @@ import {intermediate,type Pair} from '../lib/dexscreener';
 import {SolanaLocalSigner} from '../lib/solana-wallet';
 import {SOL_DEFAULTS,validateSolConfig,type SolConfig,type SolReport,type SolRoute,type SolPreview} from '../lib/solana-types';
 import SolanaWallet from './solana-wallet';
+import {apiResult} from '../lib/api-response';
 type Provider={publicKey?:{toString:()=>string},connect:()=>Promise<unknown>,disconnect?:()=>Promise<void>,signTransaction:(tx:VersionedTransaction)=>Promise<VersionedTransaction>,on?:(event:string,fn:()=>void)=>void,removeListener?:(event:string,fn:()=>void)=>void};
 type Tx={id:string,owner:string,at:number,route:string,amount:string,status:string,signature?:string,lastValidBlockHeight:number};
 const settingsKey='dex-solana-settings-v1',historyKey='dex-solana-transactions-v1';
 const short=(s:string)=>s?s.slice(0,6)+'…'+s.slice(-5):'Not connected';
-async function request(action:string,config:SolConfig,other:Record<string,unknown>={}){const res=await fetch('/api/solana',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,config,...other})}),data:any=await res.json();if(!res.ok)throw Error(data.error||'Solana request failed.');return data.result;}
+async function request(action:string,config:SolConfig,other:Record<string,unknown>={}){const res=await fetch('/api/solana',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,config,...other})});return apiResult(res,'Solana request failed.');}
 export default function SolanaDesk({pair,active}:{pair:Pair|null,active:boolean}){
  const [config,setConfig]=useState<SolConfig>(SOL_DEFAULTS),[draft,setDraft]=useState<SolConfig>(SOL_DEFAULTS),[ready,setReady]=useState(false),[address,setAddress]=useState(''),[local,setLocal]=useState(false),[walletOpen,setWalletOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false),[report,setReport]=useState<SolReport|null>(null),[preview,setPreview]=useState<SolPreview|null>(null),[history,setHistory]=useState<Tx[]>([]),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[live,setLive]=useState(false),[clock,setClock]=useState(Date.now()),[balance,setBalance]=useState('');
  const signer=useRef<SolanaLocalSigner|null>(null),provider=useRef<Provider|null>(null),epoch=useRef(0),working=useRef(false),alive=useRef(true),historyRef=useRef(history),touch=useRef(Date.now());historyRef.current=history;
