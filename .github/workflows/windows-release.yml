@@ -1,0 +1,114 @@
+name: Publish Windows 0.2.0 release
+
+on:
+  push:
+    branches: [windows-desktop-rebuild]
+    paths: [.github/workflows/windows-release.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: windows-release-v0.2.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Publish both downloads from the verified Windows build
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import zipfile
+
+          repo = os.environ['GH_REPO']
+          run_id = '38716620289'
+          source = 'a9f50ff6af335c5c7d330a2943aae9da1e22abb9'
+          tag = 'v0.2.0'
+
+          def gh(*args):
+              return subprocess.check_output(['gh', *args], text=True)
+
+          def api(path):
+              return json.loads(gh('api', f'repos/{repo}/{path}'))
+
+          run = api(f'actions/runs/{run_id}')
+          assert run['head_sha'] == source, 'Unexpected build source'
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Build must pass before release'
+          artifacts = api(f'actions/runs/{run_id}/artifacts')['artifacts']
+          matching = [a for a in artifacts if a['name'] == 'VigilantEngine-Windows-x64' and not a['expired']]
+          assert len(matching) == 1 and matching[0]['id'] == 11962134425, 'Unexpected build artifact'
+          gh('run', 'download', run_id, '--repo', repo, '--name', matching[0]['name'], '--dir', 'downloads')
+
+          files = [Path('downloads') / f'VigilantEngine-0.2.0-Windows-x64.{ext}' for ext in ('exe', 'zip')]
+          for path in files:
+              assert path.is_file() and path.stat().st_size > 80_000_000, f'Missing or truncated download: {path.name}'
+          with files[0].open('rb') as binary:
+              assert binary.read(2) == b'MZ', 'Expected Windows executable'
+          with zipfile.ZipFile(files[1]) as archive:
+              assert archive.testzip() is None, 'ZIP integrity failed'
+              assert any(n.endswith('resources/app.asar') for n in archive.namelist()), 'ZIP is missing the app'
+          expected = {p.name: (p.stat().st_size, 'sha256:' + hashlib.sha256(p.read_bytes()).hexdigest()) for p in files}
+
+          notes = '''Windows 10/11 x64 desktop release with the full interface and local API backend bundled.
+
+          **Choose one download:**
+          - **EXE:** portable application; save it in its own folder and double-click it. Keep its adjacent `VigilantEngine-Data` folder when updating.
+          - **ZIP:** alternative unpacked application; extract it and run `Vigilant Engine.exe`. Uses the normal Windows app-data directory.
+          No separate Node installation or web hosting is required. Internet access is needed for market data and RPC requests.
+
+          Includes Solana, BSC and Arbitrum One, custom RPC endpoints, authenticated HTTP/HTTPS CONNECT proxies, pooled connections, five-second market refresh, and local encrypted wallet import/signing with transaction review.
+
+          Tracks DEX Screener's returned platforms. Execution supports configured verified V2-compatible EVM routers and Raydium/PumpSwap standard-SPL Solana routes. Other pool types remain tracking-only. The existing 2% EVM developer profit fee is retained and disclosed in the app.
+
+          Validation: 76 regression tests, type checking, bundled API checks and native Windows startup passed. The application is unsigned. Funded trades were not tested; transaction confirmation depends on the blockchain.
+
+          Source: a9f50ff6af335c5c7d330a2943aae9da1e22abb9
+          Verified Windows build: https://github.com/kobyfletcher08-ops/vigilant-engine/actions/runs/38716620289
+          '''
+          Path('release-notes.md').write_text(notes, encoding='utf-8')
+
+          lookup = subprocess.run(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], capture_output=True, text=True)
+          if lookup.returncode:
+              assert '404' in lookup.stderr, lookup.stderr
+              gh('release', 'create', tag, '--repo', repo, '--target', source,
+                 '--title', 'Vigilant Engine 0.2.0 — Windows desktop', '--notes-file', 'release-notes.md', '--draft')
+              release = api(f'releases/tags/{tag}')
+          else:
+              release = json.loads(lookup.stdout)
+          assert release['target_commitish'] == source, 'Existing release targets another source'
+
+          assets = {a['name']: a for a in release['assets']}
+          for path in files:
+              if path.name in assets:
+                  asset = assets[path.name]
+                  assert (asset['size'], asset.get('digest')) == expected[path.name], 'Existing asset differs; refusing to replace it'
+              else:
+                  assert release['draft'], 'Refusing to change an existing published release'
+                  gh('release', 'upload', tag, str(path), '--repo', repo)
+
+          release = api(f'releases/tags/{tag}')
+          assets = {a['name']: a for a in release['assets']}
+          for name, metadata in expected.items():
+              asset = assets[name]
+              assert asset['state'] == 'uploaded' and (asset['size'], asset.get('digest')) == metadata, f'Uploaded asset verification failed: {name}'
+          if release['draft']:
+              gh('release', 'edit', tag, '--repo', repo, '--draft=false', '--latest')
+          release = api(f'releases/tags/{tag}')
+          assert not release['draft']
+          print(release['html_url'])
+          for asset in release['assets']:
+              print(asset['name'], asset['size'], asset.get('digest'), asset['browser_download_url'])
+          PY
