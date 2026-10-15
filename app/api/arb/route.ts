@@ -4,7 +4,7 @@ import {walletRead,broadcastSigned} from '../../../lib/wallet-relay';
 import {discoverFactories,discoverPage} from '../../../lib/pair-discovery';
 import {validateConfig} from '../../../lib/model';
 import {configuredRpc} from '../../../lib/rpc';
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import {configuredFetch} from '../../../lib/server-fetch';
 
 export const dynamic='force-dynamic';
 
@@ -13,11 +13,7 @@ export async function POST(request:Request){
  const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return Response.json({error:'Cross-origin requests are not allowed.'},{status:403});
  if(request.headers.get('content-type')!=='application/json')return Response.json({error:'JSON required.'},{status:415});
  try{const text=await request.text();if(text.length>48000)throw Error('Request exceeds the size limit.');const body=JSON.parse(text),config=validateConfig(body.config);
-  let requestFetch = fetch;
-  if(config.proxy){
-    const dispatcher = new HttpsProxyAgent(config.proxy, { keepAlive: true, maxSockets: 50 });
-    requestFetch = (url, options) => fetch(url, { ...options, dispatcher } as RequestInit);
-  }
+  const requestFetch=configuredFetch(config.proxy);
   const rpc=configuredRpc(config, requestFetch);
   let result;
   if(body.action==='scan')result=await scan(config,rpc,body.assets);

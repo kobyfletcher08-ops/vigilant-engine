@@ -13,6 +13,6 @@ export function selectNetwork(profiles:NetworkProfiles,current:Config,network:Ne
  return {profiles:{...saved,[network]:config},config};
 }
 export function profileBackup(profiles:NetworkProfiles,current:Config){
- const safe=Object.fromEntries(Object.entries(validateProfiles(profiles,current)).map(([id,c])=>[id,{...c,rpc:NETWORKS[c.network].rpc}]));
- return {version:3,config:{...current,rpc:NETWORKS[current.network].rpc},profiles:safe};
+ const safe=Object.fromEntries(Object.entries(validateProfiles(profiles,current)).map(([id,c])=>[id,{...c,rpc:NETWORKS[c.network].rpc,proxy:''}]));
+ return {version:3,config:{...current,rpc:NETWORKS[current.network].rpc,proxy:''},profiles:safe};
 }

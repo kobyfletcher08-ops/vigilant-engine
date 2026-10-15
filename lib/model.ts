@@ -1,5 +1,6 @@
 import {getAddress,parseUnits,formatUnits,ZeroAddress} from 'ethers';
 import {validateRpcSettings,type RpcSettings} from './rpc-settings.ts';
+import {proxyUrl} from './proxy-config.ts';
 export const DEV_ADDRESS='0x6A3404e7fdeE519AaaB364E1C27Db07aa99Ec922';
 export const NETWORKS={
  56:{name:'BSC Mainnet',shortName:'BSC',nativeName:'BNB',nativeSymbol:'BNB',wrappedSymbol:'WBNB',rpc:'https://bsc-dataseed.bnbchain.org',factory:'0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73',router:'0x10ED43C718714eb63d5aA57B78B54704E256024E',explorer:'https://bscscan.com'},
@@ -23,11 +24,11 @@ export function networkDefaults(network:NetworkId):Config{
  ],dexes:[{name:'PancakeSwap V2',address:NETWORKS[42161].router,enabled:true},{name:'Uniswap V2',address:'0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24',enabled:true}]};
 }
 export function safeRpc(value:unknown){let u:URL;try{u=new URL(String(value));}catch{throw Error('Enter a valid RPC URL.');}
- if(!['http:', 'https:'].includes(u.protocol))throw Error('Use an HTTP or HTTPS RPC URL.');return u.toString();}
+ if(!['http:', 'https:'].includes(u.protocol)||u.username||u.password||u.hash)throw Error('Use an HTTP or HTTPS RPC URL without user information or a fragment.');return u.toString();}
 export function amount(value:unknown,name='Amount',positive=true){if(typeof value!=='string'||!/^\d+(\.\d{1,18})?$/.test(value))throw Error(name+' must be a decimal with at most 18 places.');const n=parseUnits(value,18);if(n<0n||positive&&n===0n)throw Error(name+' must be positive.');return n;}
 const integer=(value:unknown,label:string,min:number,max:number)=>{if(!Number.isInteger(value)||Number(value)<min||Number(value)>max)throw Error(`${label} must be ${min}–${max}.`);return Number(value);};
 export function address(value:unknown,label='Address'){let a;try{a=getAddress(String(value).toLowerCase());}catch{throw Error(label+' is invalid.');}if(a===ZeroAddress)throw Error(label+' cannot be zero.');return a;}
-export function safeProxy(value:unknown){if(!value)return '';let u:URL;try{u=new URL(String(value));}catch{throw Error('Enter a valid HTTP/HTTPS proxy URL or leave empty.');}if(!['http:', 'https:'].includes(u.protocol))throw Error('Use an HTTP or HTTPS proxy URL.');return u.toString();}
+export const safeProxy=proxyUrl;
 export function validateConfig(value:unknown):Config{
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Configuration must be an object.');const c=value as Config;
  if(!supportedNetwork(c.network))throw Error('Choose BSC mainnet/testnet or Arbitrum One.');const net=NETWORKS[c.network];

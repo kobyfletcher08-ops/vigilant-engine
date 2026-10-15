@@ -57,3 +57,7 @@ next-env.d.ts
 
 # Generated TypeScript build cache
 *.tsbuildinfo
+
+# Windows desktop output and packaging state
+/desktop-package/
+/release/

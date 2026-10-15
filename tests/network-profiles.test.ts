@@ -30,7 +30,7 @@ test('legacy settings migrate to the selected profile and survive a multi-networ
  const reloaded=validateProfiles(saved.profiles,validateConfig(saved.config)),back=selectNetwork(reloaded,saved.config,56);assert.deepEqual(back.config,bsc);
 });
 test('configuration backups redact RPC credentials from every saved network and round-trip profiles',()=>{
- const bsc=validateConfig({...networkDefaults(56),rpc:'https://rpc.example.com/bsc-secret?key=private-bsc'}),arb=validateConfig({...networkDefaults(42161),rpc:'https://rpc.example.com/arb-secret?key=private-arb',contract:'0x'+'4'.repeat(40)});
+ const bsc=validateConfig({...networkDefaults(56),rpc:'https://rpc.example.com/bsc-secret?key=private-bsc',proxy:'host:8080:login:proxy-secret'}),arb=validateConfig({...networkDefaults(42161),rpc:'https://rpc.example.com/arb-secret?key=private-arb',contract:'0x'+'4'.repeat(40)});
  const backup=profileBackup({56:bsc,42161:arb},arb),serialized=JSON.stringify(backup);assert.equal(backup.version,3);assert.doesNotMatch(serialized,/secret|private-bsc|private-arb/);
  const restored=validateProfiles(JSON.parse(serialized).profiles,validateConfig(backup.config));assert.equal(restored[56]!.rpc,new URL(NETWORKS[56].rpc).toString());assert.equal(restored[42161]!.rpc,NETWORKS[42161].rpc);assert.equal(restored[42161]!.contract,arb.contract);
 });
