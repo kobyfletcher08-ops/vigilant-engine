@@ -23,3 +23,13 @@ test('authenticated CONNECT transport routes through the proxy and never sends i
     assert.ok(connects>0);assert.equal(request,desktopFetch(`http://login:p%3Aa%40ss@127.0.0.1:${proxyPort}`));
   } finally {await closeTransport();for(const socket of sockets)socket.destroy();target.closeAllConnections();proxy.closeAllConnections();await Promise.all([new Promise<void>(r=>target.close(()=>r())),new Promise<void>(r=>proxy.close(()=>r()))]);}
 });
+test('direct requests preserve the runtime native fetch transport and its DNS configuration',async()=>{
+  const original=globalThis.fetch;let called=0;
+  globalThis.fetch=(async()=>{called++;return Response.json({ok:true});}) as typeof fetch;
+  try {
+    const module=new URL('../desktop/transport.ts',import.meta.url);module.search='native-transport-test';
+    const isolated=await import(module.href),request=isolated.desktopFetch();
+    const response=await request('https://runtime-fixture.invalid',{method:'POST',body:'{}',signal:AbortSignal.timeout(1000)});
+    assert.deepEqual(await response.json(),{ok:true});assert.equal(called,1);await isolated.closeTransport();
+  } finally {globalThis.fetch=original;}
+});
