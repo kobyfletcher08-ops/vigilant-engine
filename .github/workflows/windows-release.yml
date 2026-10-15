@@ -80,15 +80,17 @@ jobs:
           '''
           Path('release-notes.md').write_text(notes, encoding='utf-8')
 
-          lookup = subprocess.run(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], capture_output=True, text=True)
-          if lookup.returncode:
-              assert '404' in lookup.stderr, lookup.stderr
-              gh('release', 'create', tag, '--repo', repo, '--target', source,
-                 '--title', 'Vigilant Engine 0.2.0 — Windows desktop', '--notes-file', 'release-notes.md', '--draft')
-              release = api(f'releases/tags/{tag}')
+          # Drafts can exist before their Git tag, so resolve them by release ID.
+          matching_releases = [r for r in api('releases?per_page=100') if r['tag_name'] == tag]
+          assert len(matching_releases) <= 1, 'Ambiguous release tag'
+          if not matching_releases:
+              release = json.loads(gh('api', f'repos/{repo}/releases', '--method', 'POST',
+                  '-f', f'tag_name={tag}', '-f', f'target_commitish={source}',
+                  '-f', 'name=Vigilant Engine 0.2.0 — Windows desktop', '-F', 'draft=true', '-f', f'body={notes}'))
           else:
-              release = json.loads(lookup.stdout)
+              release = matching_releases[0]
           assert release['target_commitish'] == source, 'Existing release targets another source'
+          release_path = f"releases/{release['id']}"
 
           assets = {a['name']: a for a in release['assets']}
           for path in files:
@@ -99,14 +101,14 @@ jobs:
                   assert release['draft'], 'Refusing to change an existing published release'
                   gh('release', 'upload', tag, str(path), '--repo', repo)
 
-          release = api(f'releases/tags/{tag}')
+          release = api(release_path)
           assets = {a['name']: a for a in release['assets']}
           for name, metadata in expected.items():
               asset = assets[name]
               assert asset['state'] == 'uploaded' and (asset['size'], asset.get('digest')) == metadata, f'Uploaded asset verification failed: {name}'
           if release['draft']:
               gh('release', 'edit', tag, '--repo', repo, '--draft=false', '--latest')
-          release = api(f'releases/tags/{tag}')
+          release = api(release_path)
           assert not release['draft']
           print(release['html_url'])
           for asset in release['assets']:
