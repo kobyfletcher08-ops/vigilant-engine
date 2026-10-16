@@ -1,0 +1,258 @@
+[
+  {
+    "id": "solana",
+    "name": "Solana"
+  },
+  {
+    "id": "robinhood",
+    "name": "Robinhood"
+  },
+  {
+    "id": "bsc",
+    "name": "BSC"
+  },
+  {
+    "id": "ethereum",
+    "name": "Ethereum"
+  },
+  {
+    "id": "base",
+    "name": "Base"
+  },
+  {
+    "id": "polygon",
+    "name": "Polygon"
+  },
+  {
+    "id": "pulsechain",
+    "name": "PulseChain"
+  },
+  {
+    "id": "near",
+    "name": "NEAR"
+  },
+  {
+    "id": "hyperevm",
+    "name": "HyperEVM"
+  },
+  {
+    "id": "arc",
+    "name": "Arc"
+  },
+  {
+    "id": "ton",
+    "name": "TON"
+  },
+  {
+    "id": "cronos",
+    "name": "Cronos"
+  },
+  {
+    "id": "sui",
+    "name": "Sui"
+  },
+  {
+    "id": "xrpl",
+    "name": "XRPL"
+  },
+  {
+    "id": "ink",
+    "name": "Ink"
+  },
+  {
+    "id": "arbitrum",
+    "name": "Arbitrum"
+  },
+  {
+    "id": "avalanche",
+    "name": "Avalanche"
+  },
+  {
+    "id": "starknet",
+    "name": "Starknet"
+  },
+  {
+    "id": "sonic",
+    "name": "Sonic"
+  },
+  {
+    "id": "monad",
+    "name": "Monad"
+  },
+  {
+    "id": "worldchain",
+    "name": "World Chain"
+  },
+  {
+    "id": "hyperliquid",
+    "name": "Hyperliquid"
+  },
+  {
+    "id": "tron",
+    "name": "Tron"
+  },
+  {
+    "id": "hedera",
+    "name": "Hedera"
+  },
+  {
+    "id": "abstract",
+    "name": "Abstract"
+  },
+  {
+    "id": "icp",
+    "name": "ICP"
+  },
+  {
+    "id": "optimism",
+    "name": "Optimism"
+  },
+  {
+    "id": "multiversx",
+    "name": "MultiversX"
+  },
+  {
+    "id": "zksync",
+    "name": "zkSync"
+  },
+  {
+    "id": "linea",
+    "name": "Linea"
+  },
+  {
+    "id": "plasma",
+    "name": "Plasma"
+  },
+  {
+    "id": "stable",
+    "name": "Stable"
+  },
+  {
+    "id": "injective",
+    "name": "Injective"
+  },
+  {
+    "id": "berachain",
+    "name": "Berachain"
+  },
+  {
+    "id": "mantle",
+    "name": "Mantle"
+  },
+  {
+    "id": "cardano",
+    "name": "Cardano"
+  },
+  {
+    "id": "aptos",
+    "name": "Aptos"
+  },
+  {
+    "id": "seiv2",
+    "name": "Sei V2"
+  },
+  {
+    "id": "algorand",
+    "name": "Algorand"
+  },
+  {
+    "id": "blast",
+    "name": "Blast"
+  },
+  {
+    "id": "megaeth",
+    "name": "MegaETH"
+  },
+  {
+    "id": "celo",
+    "name": "Celo"
+  },
+  {
+    "id": "fantom",
+    "name": "Fantom"
+  },
+  {
+    "id": "apechain",
+    "name": "ApeChain"
+  },
+  {
+    "id": "metis",
+    "name": "Metis"
+  },
+  {
+    "id": "unichain",
+    "name": "Unichain"
+  },
+  {
+    "id": "stacks",
+    "name": "Stacks"
+  },
+  {
+    "id": "soneium",
+    "name": "Soneium"
+  },
+  {
+    "id": "opbnb",
+    "name": "opBNB"
+  },
+  {
+    "id": "conflux",
+    "name": "Conflux"
+  },
+  {
+    "id": "flowevm",
+    "name": "Flow EVM"
+  },
+  {
+    "id": "manta",
+    "name": "Manta"
+  },
+  {
+    "id": "kava",
+    "name": "Kava"
+  },
+  {
+    "id": "beam",
+    "name": "Beam"
+  },
+  {
+    "id": "flare",
+    "name": "Flare"
+  },
+  {
+    "id": "merlinchain",
+    "name": "Merlin Chain"
+  },
+  {
+    "id": "scroll",
+    "name": "Scroll"
+  },
+  {
+    "id": "fuse",
+    "name": "Fuse"
+  },
+  {
+    "id": "story",
+    "name": "Story"
+  },
+  {
+    "id": "telos",
+    "name": "Telos"
+  },
+  {
+    "id": "katana",
+    "name": "Katana"
+  },
+  {
+    "id": "movement",
+    "name": "Movement"
+  },
+  {
+    "id": "polkadot",
+    "name": "Polkadot"
+  },
+  {
+    "id": "stepnetwork",
+    "name": "Step Network"
+  }
+]

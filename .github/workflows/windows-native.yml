@@ -1,0 +1,64 @@
+name: Native Rust Windows
+on:
+  push:
+    branches: [native-rust-rewrite]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Test native engine
+        run: cargo test --locked --lib
+      - name: Build native Windows application
+        run: cargo build --locked --release --bins
+      - name: Benchmark native market analysis
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          & target/release/vigilant-bench.exe | Tee-Object -FilePath release/benchmark.json
+          if ($LASTEXITCODE -ne 0) { throw 'Native benchmark failed' }
+      - name: Test actual WebView2 application
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath target/release/vigilant-engine-native.exe -ArgumentList '--smoke-test' -PassThru -RedirectStandardOutput release/smoke.stdout.log -RedirectStandardError release/smoke.stderr.log
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'Native window test timed out' }
+          Get-Content release/smoke.stdout.log
+          Get-Content release/smoke.stderr.log
+          if ($p.ExitCode -ne 0) { throw "Native window test failed with exit $($p.ExitCode)" }
+          if (-not (Select-String -Path release/smoke.stdout.log -Pattern 'NATIVE_DESKTOP_SMOKE PASS' -Quiet)) { throw 'The real UI did not report successful native IPC' }
+      - name: Package EXE and portable ZIP
+        shell: pwsh
+        run: |
+          Copy-Item target/release/vigilant-engine-native.exe release/VigilantEngine-Native-0.3.0-x64.exe
+          New-Item -ItemType Directory -Force release/portable | Out-Null
+          Copy-Item release/VigilantEngine-Native-0.3.0-x64.exe release/portable/
+          Copy-Item WINDOWS.md release/portable/README.txt
+          Copy-Item release/benchmark.json release/portable/
+          Compress-Archive -Path release/portable/* -DestinationPath release/VigilantEngine-Native-0.3.0-x64.zip
+          Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe','.zip' } | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content release/SHA256SUMS.txt
+      - name: Upload Windows deliverables and verification logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VigilantEngine-Native-Windows-x64
+          path: |
+            release/*.exe
+            release/*.zip
+            release/*.json
+            release/*.txt
+            release/*.log
+          if-no-files-found: warn
+          retention-days: 14

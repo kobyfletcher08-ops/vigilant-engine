@@ -1,0 +1,60 @@
+[package]
+name = "vigilant-engine-native"
+version = "0.3.0"
+edition = "2021"
+description = "Native Rust all-chain DEX Screener and arbitrage console"
+authors = ["Koby Dench"]
+license = "MIT"
+default-run = "vigilant-engine-native"
+
+[lib]
+name = "vigilant_engine"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2", "gzip", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures = "0.3"
+url = "2"
+percent-encoding = "2"
+sha2 = "0.10"
+sha3 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+base64 = "0.22"
+bs58 = "0.5"
+primitive-types = "0.12"
+rlp = "0.5"
+k256 = { version = "0.13", features = ["ecdsa"] }
+ed25519-dalek = "2"
+curve25519-dalek = "4"
+bip39 = "2"
+bip32 = "0.5"
+unicode-normalization = "0.1"
+aes-gcm = "0.10"
+argon2 = "0.5"
+pbkdf2 = "0.12"
+scrypt = "0.11"
+aes = "0.8"
+ctr = "0.9"
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+
+[target.'cfg(windows)'.dependencies]
+tauri = { version = "2", features = ["custom-protocol"] }
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[[bin]]
+name = "vigilant-bench"
+path = "src/bin/bench.rs"

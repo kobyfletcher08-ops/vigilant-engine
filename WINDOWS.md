@@ -1,28 +1,19 @@
-# Vigilant Engine for Windows
+Vigilant Engine Native 0.3.0 — Windows x64
 
-The desktop package includes the full interface, Node runtime and API backend. It runs locally without Render, Cloudflare, a separate Node installation or a ChatGPT sign-in. Internet access is needed for market data and blockchain RPCs.
+Download either the EXE or the ZIP. The ZIP contains the same executable, these instructions and the measured benchmark. Both downloads are not required.
 
-Download `VigilantEngine-0.2.1-Windows-x64.exe` from the GitHub release. Open it on Windows 10/11 x64. The portable EXE keeps its application data in `VigilantEngine-Data` next to the EXE; keep that directory when updating. The ZIP contains the same application as an unpacked folder; extract it and run `VigilantEngine.exe`. It uses the normal Windows user-data directory. Both builds are unsigned.
+Put the EXE in a writable folder and double-click it. Microsoft Edge WebView2 Runtime must be installed (normally present on Windows 10/11). If Windows reports it missing, install Microsoft's official Evergreen WebView2 Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ . No Node.js or Electron is needed.
 
-Version 0.2.1 fixes the `Origin required` / `Unexpected token O` error when the desktop interface calls its backend. Origin checks use Electron's trusted Chromium initiator, including when the optional HTTP Origin header is absent. The Windows startup check now exercises POST requests to all three APIs from the actual renderer.
+The application creates VigilantEngine-Rust-Data alongside the EXE. Keep this folder when updating. It contains settings, encrypted wallet keys, history and the WebView2 profile. Proxy and RPC credentials are local settings; keep the data folder private. Configuration exports remove these credentials.
 
-Use Settings for your BSC/Arbitrum RPC and proxy. Solana has its own settings under DEX Screener → Solana. Proxies accept `hostname:port:login:password`, `https://hostname:port:login:password`, or `http(s)://login:password@hostname:port`. Requests use real CONNECT tunneling and reused connections; proxy errors never silently fall back to a direct connection. Credentials are removed from exported configuration backups.
+Migration: keep the previous Electron version and its data folder until the new app is configured. Export encrypted wallet backups from the old app, then restore them in Wallets. Recovery phrases are not stored. Unlocking lasts five minutes. Always retain independent recovery backups.
 
-Import and unlock a wallet under Wallets (EVM) or the Solana execution panel. Seed derivation, encryption and signing remain in the isolated local interface. Seeds and private keys are never sent to the backend. Browser wallet extensions are supported by the web version; the desktop uses the local signer.
+Proxy setup: Settings > RPC / default HTTP(S) proxy. Enter hostname:port:login:password or an HTTP(S) proxy URL. Use the DEX Screener override to route market requests through a different proxy. Save, then use Test saved market connection. Leave the override empty to use the default. An empty default means direct requests. There is no silent direct fallback when a configured proxy fails.
 
-DEX Screener tracks every returned DEX without a platform allowlist. BSC and Arbitrum execution supports configured, verified V2-compatible routers and the included authenticated executor. Solana execution supports Raydium and PumpSwap standard-SPL routes with an atomic Kamino flash loan. Unsupported pool types remain available for tracking. Actual router quotes, network fees, liquidity and fresh full simulations determine whether a route can be submitted.
+The scanner reduces redundant requests using batches, shared caches, rate budgets and cooldowns. A proxy cannot guarantee exemption from DEX Screener limits. Cached results remain visible during upstream throttling.
 
-Fetching uses pooled connections, coalesced market requests and a five-second market refresh option. Submission occurs after the final simulation and explicit signature. Network confirmation time still depends on the blockchain. Transactions are not automatically repeated after an uncertain response.
+All chains in the selector support market tracking. Live execution is limited to the supported BSC/Arbitrum V2 and Solana Raydium/PumpSwap adapters. Market prices alone are not executable arbitrage quotes. Review simulation, the expected net result, all fees and the network before signing. The included EVM executor has the existing 2% developer share of positive gross profit.
 
-## Build from source
+No code can make blockchain confirmations instantaneous or guarantee profit. Failed on-chain transactions can still consume network fees. An uncertain submission is saved and never retried automatically; check confirmations before preparing another transaction.
 
-Install Node 24 and pnpm 11.25.0, then run:
-
-```sh
-pnpm install --frozen-lockfile --ignore-scripts
-pnpm test
-pnpm exec tsc --noEmit
-pnpm desktop:pack
-```
-
-The frontend and backend are staged in `desktop-package`; downloads are written to `release`. The `Windows desktop executable` GitHub Actions workflow also launches the Windows application to verify that the interface, secure context and local backend load before uploading either package. No funded-wallet transaction is part of the build or tests.
+The binary is not code-signed, so Windows may show an unknown-publisher prompt. Compare its SHA-256 hash with SHA256SUMS.txt from the same GitHub release.
