@@ -8,7 +8,7 @@ The application creates VigilantEngine-Rust-Data alongside the EXE. Keep this fo
 
 Migration: keep the previous Electron version and its data folder until the new app is configured. Export encrypted wallet backups from the old app, then restore them in Wallets. Recovery phrases are not stored. Unlocking lasts five minutes. Always retain independent recovery backups.
 
-Proxy setup: Settings > RPC / default HTTP(S) proxy. Enter hostname:port:login:password or an HTTP(S) proxy URL. Use the DEX Screener override to route market requests through a different proxy. Save, then use Test saved market connection. Leave the override empty to use the default. An empty default means direct requests. There is no silent direct fallback when a configured proxy fails.
+Proxy setup: Settings > RPC / default HTTP(S) proxy. Enter hostname:port:login:password or an HTTP(S) proxy URL. Use the DEX Screener override to route market requests through a different proxy. Save, then use Test saved market connection. Leave the override empty to use the default. An empty default means direct requests. Rotating gateways use a new connection for each outgoing market request. Cached results do not trigger a request or rotate the gateway. There is no silent direct fallback when a configured proxy fails.
 
 The scanner reduces redundant requests using batches, shared caches, rate budgets and cooldowns. A proxy cannot guarantee exemption from DEX Screener limits. Cached results remain visible during upstream throttling.
 

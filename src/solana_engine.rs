@@ -179,7 +179,7 @@ pub fn flash(
 #[derive(Clone)]
 enum Venue {
     Ray,
-    Pump(pump::Pool),
+    Pump(Box<pump::Pool>),
 }
 impl Venue {
     fn name(&self) -> &str {
@@ -298,7 +298,7 @@ fn verify_swap(
             1,
             9,
             d.len() >= 17
-                && (d.len() - 17) % 16 == 0
+                && (d.len() - 17).is_multiple_of(16)
                 && d[0] == 0
                 && matches(4, owner)
                 && matches(5, input)
@@ -349,18 +349,29 @@ fn verify_swap(
     }
     Ok(())
 }
+#[derive(Clone, Copy)]
+struct SwapBuild<'a> {
+    owner: Pubkey,
+    token: Pubkey,
+    c: &'a Config,
+    r: &'a Rpc,
+    t: &'a Transport,
+}
 async fn build(
     venue: &Venue,
     buy: bool,
     input: u64,
     minimum: u64,
     q: &Quote,
-    owner: Pubkey,
-    token: Pubkey,
-    c: &Config,
-    r: &Rpc,
-    t: &Transport,
+    ctx: &SwapBuild<'_>,
 ) -> Result<(Instruction, Vec<Table>)> {
+    let SwapBuild {
+        owner,
+        token,
+        c,
+        r,
+        t,
+    } = *ctx;
     let wsol = key(crate::chains::WSOL)?;
     let (from, to) = if buy { (wsol, token) } else { (token, wsol) };
     let (ix, tables) = match venue {
@@ -392,6 +403,19 @@ async fn build(
                 let p = pubkey(&ix.program);
                 if RAY.contains(&p.as_str()) {
                     swaps.push(ix);
+                } else if p == ATA {
+                    // Setup is rebuilt locally. Accept only this wallet's exact SPL ATA.
+                    if ix.accounts.len() != 6
+                        || ix.accounts[0].key != owner
+                        || ix.accounts[2].key != owner
+                        || ![from, to].contains(&ix.accounts[3].key)
+                        || ix.accounts[1].key != associated(&owner, &ix.accounts[3].key)?
+                        || ix.accounts[4].key != [0; 32]
+                        || ix.accounts[5].key != key(TOKEN)?
+                        || !(ix.data.is_empty() || ix.data == [1])
+                    {
+                        return Err("Route builder requested unexpected account setup.".into());
+                    }
                 } else if p != COMPUTE {
                     return Err("Route builder included an unexpected program.".into());
                 }
@@ -501,7 +525,7 @@ async fn load(
         if let Some(s) = p["pairAddress"].as_str() {
             if let Ok(address) = key(s) {
                 match pump::load(&r, address, token).await {
-                    Ok(p) => venues.push(Venue::Pump(p)),
+                    Ok(p) => venues.push(Venue::Pump(Box::new(p))),
                     Err(_) => notes
                         .push("A PumpSwap pool could not be verified for native execution.".into()),
                 }
@@ -837,9 +861,16 @@ pub async fn prepare(
     if d.output < minimum {
         return Err("Refreshed quote cannot cover account rent and minimum profit.".into());
     }
+    let ctx = SwapBuild {
+        owner: wallet,
+        token: l.token,
+        c,
+        r: &l.r,
+        t: &t,
+    };
     let ((buy, bt), (sell, st)) = tokio::try_join!(
-        build(&d.buy, true, borrow, d.asset, &d.bq, wallet, l.token, c, &l.r, &t),
-        build(&d.sell, false, d.asset, minimum, &d.sq, wallet, l.token, c, &l.r, &t)
+        build(&d.buy, true, borrow, d.asset, &d.bq, &ctx),
+        build(&d.sell, false, d.asset, minimum, &d.sq, &ctx)
     )?;
     let mut limit = vec![2];
     limit.extend_from_slice(&1_000_000u32.to_le_bytes());

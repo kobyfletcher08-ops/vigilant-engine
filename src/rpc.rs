@@ -265,4 +265,57 @@ mod tests {
         assert!(word(&[], 0).is_err());
         assert_eq!(ceil(U256::from(10), U256::from(3)), U256::from(4));
     }
+    #[tokio::test]
+    async fn read_batches_restore_order_and_reject_duplicate_ids() {
+        use crate::test_server::server;
+        use std::sync::atomic::Ordering;
+        let server = server(
+            |body| {
+                let mut rows: Vec<_> = body
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| json!({"jsonrpc":"2.0","id":v["id"],"result":v["params"][0]}))
+                    .collect();
+                rows.reverse();
+                (200, Value::Array(rows))
+            },
+            std::time::Duration::from_millis(10),
+        )
+        .await;
+        let r = Rpc::new(Arc::new(Transport::new()), &server.url, "").unwrap();
+        let values = r
+            .batch((0..40).map(|i| ("eth_call".into(), json!([i]))).collect())
+            .await;
+        for (i, v) in values.into_iter().enumerate() {
+            assert_eq!(v.unwrap(), i as u64);
+        }
+        assert_eq!(server.requests.load(Ordering::SeqCst), 3);
+        let duplicate = crate::test_server::server(
+            |body| {
+                let id = body[0]["id"].clone();
+                (200, json!([{"id":id,"result":1},{"id":id,"result":2}]))
+            },
+            std::time::Duration::ZERO,
+        )
+        .await;
+        let r = Rpc::new(Arc::new(Transport::new()), &duplicate.url, "").unwrap();
+        assert!(r.batch(vec![("eth_call".into(), json!([]))]).await[0].is_err());
+    }
+    #[tokio::test]
+    async fn failed_broadcast_is_sent_once_and_not_retried() {
+        use crate::test_server::server;
+        use std::sync::atomic::Ordering;
+        let server = server(
+            |_| (500, json!({"error":"upstream failed"})),
+            std::time::Duration::ZERO,
+        )
+        .await;
+        let r = Rpc::new(Arc::new(Transport::new()), &server.url, "").unwrap();
+        assert!(r
+            .send("eth_sendRawTransaction", json!(["0x00"]))
+            .await
+            .is_err());
+        assert_eq!(server.requests.load(Ordering::SeqCst), 1);
+    }
 }

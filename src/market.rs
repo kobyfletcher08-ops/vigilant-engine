@@ -8,7 +8,7 @@ use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -275,7 +275,7 @@ pub fn analyze(rows: &[Pair], filters: &Filters) -> (Vec<Pair>, usize, Vec<Sprea
         .take(size)
         .cloned()
         .collect();
-    let mut spreads: Vec<_> = groups
+    let mut candidates: Vec<_> = groups
         .into_iter()
         .filter_map(|(id, g)| {
             let spread = (g.sell.price_native / g.buy.price_native - 1.0) * 100.0;
@@ -283,17 +283,23 @@ pub fn analyze(rows: &[Pair], filters: &Filters) -> (Vec<Pair>, usize, Vec<Sprea
                 && spread.is_finite()
                 && spread > 0.0
                 && spread >= filters.min_spread.max(0.0))
-            .then(|| Spread {
-                id,
-                buy: g.buy.clone(),
-                sell: g.sell.clone(),
-                spread,
-                count: g.count,
-            })
+            .then_some((id, g, spread))
         })
         .collect();
-    spreads.sort_unstable_by(|a, b| b.spread.total_cmp(&a.spread));
-    spreads.truncate(100);
+    // Rank borrowed pool references and clone only the 100 visible comparisons.
+    // Large catalogues otherwise allocate a full pair DTO for every spread.
+    candidates.sort_unstable_by(|a, b| b.2.total_cmp(&a.2));
+    let spreads = candidates
+        .into_iter()
+        .take(100)
+        .map(|(id, g, spread)| Spread {
+            id,
+            buy: g.buy.clone(),
+            sell: g.sell.clone(),
+            spread,
+            count: g.count,
+        })
+        .collect();
     (pairs, total, spreads)
 }
 impl MarketEngine {
@@ -348,6 +354,9 @@ impl MarketEngine {
     }
     fn merge(&self, rows: Vec<Pair>) {
         let mut s = self.snapshot.lock().unwrap();
+        if !rows.is_empty() {
+            s.at = now_ms();
+        }
         for p in rows {
             s.chains.entry(p.chain.clone()).or_insert_with(|| Chain {
                 id: p.chain.clone(),
@@ -484,11 +493,36 @@ impl MarketEngine {
                 }
             }
         }
+        // Retain discovered token addresses between cycles, and visit every
+        // catalogue chain even when it has no current profile/boost listing.
+        {
+            let snapshot = self.snapshot.lock().unwrap();
+            let mut discovered: Vec<_> = snapshot.pairs.values().collect();
+            discovered.sort_unstable_by(|a, b| b.liquidity.total_cmp(&a.liquidity));
+            for p in discovered {
+                let list = tokens.entry(p.chain.clone()).or_default();
+                if list.len() < 90 {
+                    list.push(p.base.address.clone());
+                }
+            }
+        }
         let mut selected: Vec<String> = if filters.scope == "all" {
-            tokens.keys().cloned().collect()
+            let snapshot = self.snapshot.lock().unwrap();
+            let mut all: BTreeSet<String> = snapshot.chains.keys().cloned().collect();
+            all.extend(tokens.keys().cloned());
+            all.into_iter().collect()
         } else {
             vec![filters.scope.clone()]
         };
+        selected.sort_by_key(|c| {
+            (
+                ["solana", "bsc", "arbitrum", "ethereum", "base", "optimism"]
+                    .iter()
+                    .position(|p| p == c)
+                    .unwrap_or(6),
+                c.clone(),
+            )
+        });
         if filters.scope == "all" && !selected.is_empty() {
             let rotate = self.cursor.fetch_add(12, Ordering::Relaxed) % selected.len();
             selected.rotate_left(rotate);
@@ -532,7 +566,7 @@ impl MarketEngine {
                 ));
             }
         }
-        let outcomes = stream::iter(jobs.into_iter().map(|(chain, path, search)| async move {
+        let mut outcomes = stream::iter(jobs.into_iter().map(|(chain, path, search)| async move {
             if let Some(q) = search {
                 return self.search(&chain, &q, proxy).await;
             }
@@ -548,10 +582,8 @@ impl MarketEngine {
                 .filter(|p| p.chain == chain)
                 .collect::<Vec<_>>())
         }))
-        .buffer_unordered(8)
-        .collect::<Vec<_>>()
-        .await;
-        for result in outcomes {
+        .buffer_unordered(8);
+        while let Some(result) = outcomes.next().await {
             match result {
                 Ok(rows) => self.merge(rows),
                 Err(e) => {

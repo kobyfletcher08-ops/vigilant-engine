@@ -1064,12 +1064,85 @@ mod tests {
     #[test]
     fn native_executor_artifact_and_immutable_mask_are_consistent() {
         let runtime = artifact()["runtime"].as_str().unwrap();
+        let expected = canonical_runtime(runtime).unwrap();
+        let mut bytes = decode_hex(runtime).unwrap();
+        bytes[670..702].fill(0x42);
         assert_eq!(
-            canonical_runtime(runtime).unwrap(),
-            canonical_runtime(runtime).unwrap()
+            canonical_runtime(&format!("0x{}", hex::encode(&bytes))).unwrap(),
+            expected
+        );
+        bytes[0] ^= 1;
+        assert_ne!(
+            canonical_runtime(&format!("0x{}", hex::encode(&bytes))).unwrap(),
+            expected
         );
         assert!(canonical_runtime("0x00").is_err());
         assert!(defaults(56).validate().is_ok());
         assert!(defaults(42161).validate().is_ok());
+    }
+    #[test]
+    fn native_eip155_signature_preserves_transaction_and_binds_chain() {
+        let key = [0x46; 32];
+        let owner = crate::wallet::account_address("evm", &key).unwrap();
+        let mut p = Preview {
+            id: "test".into(),
+            kind: "trade".into(),
+            description: String::new(),
+            chain_id: 56,
+            owner: owner.clone(),
+            to: Some("0x3535353535353535353535353535353535353535".into()),
+            data: "0x123456".into(),
+            gas: "0x5208".into(),
+            gas_price: "0x04a817c800".into(),
+            nonce: "0x09".into(),
+            cost: "0".into(),
+            expires: now_ms() + 60000,
+            predicted_address: None,
+            config: defaults(56),
+        };
+        let (raw, hash) = sign_transaction(&p, &key).unwrap();
+        let bytes = decode_hex(&raw).unwrap();
+        assert_eq!(hash, format!("0x{}", hex::encode(keccak(&bytes))));
+        let rlp = rlp::Rlp::new(&bytes);
+        assert_eq!(rlp.item_count().unwrap(), 9);
+        assert_eq!(rlp.val_at::<u64>(0).unwrap(), 9);
+        assert_eq!(rlp.val_at::<u64>(1).unwrap(), 20_000_000_000);
+        assert_eq!(rlp.val_at::<u64>(2).unwrap(), 21000);
+        assert_eq!(rlp.val_at::<Vec<u8>>(3).unwrap(), vec![0x35; 20]);
+        assert!(rlp.val_at::<Vec<u8>>(4).unwrap().is_empty());
+        assert_eq!(rlp.val_at::<Vec<u8>>(5).unwrap(), vec![0x12, 0x34, 0x56]);
+        let v = rlp.val_at::<u64>(6).unwrap();
+        assert!([147, 148].contains(&v));
+        let mut unsigned = rlp::RlpStream::new_list(9);
+        for i in 0..6 {
+            unsigned.append_raw(rlp.at(i).unwrap().as_raw(), 1);
+        }
+        unsigned.append(&56u64);
+        unsigned.append_empty_data();
+        unsigned.append_empty_data();
+        let mut signature = [0u8; 64];
+        for (i, at) in [(7, 0), (8, 32)] {
+            let b = rlp.val_at::<Vec<u8>>(i).unwrap();
+            signature[at + 32 - b.len()..at + 32].copy_from_slice(&b);
+        }
+        let sig = k256::ecdsa::Signature::from_slice(&signature).unwrap();
+        let recovered = k256::ecdsa::VerifyingKey::recover_from_prehash(
+            &keccak(&unsigned.out()),
+            &sig,
+            k256::ecdsa::RecoveryId::try_from((v - 147) as u8).unwrap(),
+        )
+        .unwrap();
+        let point = recovered.to_encoded_point(false);
+        assert_eq!(
+            owner,
+            format!("0x{}", hex::encode(&keccak(&point.as_bytes()[1..])[12..]))
+        );
+        p.chain_id = 42161;
+        assert_ne!(sign_transaction(&p, &key).unwrap().0, raw);
+        p.expires = 0;
+        assert!(sign_transaction(&p, &key).is_err());
+        p.expires = now_ms() + 60000;
+        p.owner = "0x1111111111111111111111111111111111111111".into();
+        assert!(sign_transaction(&p, &key).is_err());
     }
 }

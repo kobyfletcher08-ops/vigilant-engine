@@ -305,6 +305,15 @@ async fn evm_submit(
     if s.wallets.address("evm")? != p.owner {
         return Err("Wallet changed since the review.".into());
     }
+    if s.store.history().iter().any(|v| {
+        v["kind"] == "evm"
+            && v["network"] == p.chain_id
+            && v["owner"] == p.owner
+            && v["nonce"] == p.nonce
+            && ["unknown", "pending", "confirming"].contains(&v["status"].as_str().unwrap_or(""))
+    }) {
+        return Err("A saved submission already uses this wallet nonce. Check its confirmation before submitting another transaction.".into());
+    }
     let rpc = evm::preflight(&p, s.transport.clone()).await?;
     let key = s.wallets.key("evm")?;
     let (raw, hash) = evm::sign_transaction(&p, &key)?;

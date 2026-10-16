@@ -106,6 +106,9 @@ impl Store {
             crate::chains::validate_chain(c)?;
             rpc_url(url)?;
         }
+        if settings.watchlist.values().map(Vec::len).sum::<usize>() > 500 {
+            return Err("Watchlist supports at most 500 tokens in total.".into());
+        }
         for (c, mints) in &settings.watchlist {
             crate::chains::validate_chain(c)?;
             if mints.len() > 30 || mints.iter().any(|m| !crate::chains::valid_token(c, m)) {
@@ -174,6 +177,7 @@ mod tests {
         let s = Store::open(d.clone()).unwrap();
         let mut config = Settings::default();
         config.proxy = "proxy.test:8080:login:password".into();
+        config.market_proxy = "market-proxy.test:8080:market:market-secret".into();
         config
             .rpcs
             .insert("bsc".into(), "https://rpc.test/secret-key".into());
@@ -181,6 +185,7 @@ mod tests {
         let backup = serde_json::to_string(&s.backup()).unwrap();
         assert!(!backup.contains("password"));
         assert!(!backup.contains("secret-key"));
+        assert!(!backup.contains("market-secret"));
         fs::remove_dir_all(d).unwrap();
     }
 }

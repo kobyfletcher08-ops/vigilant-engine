@@ -1,4 +1,4 @@
 fn main() {
-    #[cfg(windows)]
+    #[cfg(all(windows, feature = "desktop"))]
     tauri_build::build();
 }

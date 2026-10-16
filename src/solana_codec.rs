@@ -32,10 +32,7 @@ pub async fn tables(r: &Rpc, addresses: &[Pubkey]) -> Result<Vec<Table>> {
         }
         out.push(Table {
             address: *address,
-            keys: data[56..]
-                .chunks_exact(32)
-                .map(|k| k.try_into().unwrap())
-                .collect(),
+            keys: data[56..].as_chunks::<32>().0.to_vec(),
         });
     }
     Ok(out)

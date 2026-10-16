@@ -7,21 +7,27 @@ permissions:
   contents: read
 concurrency:
   group: native-windows-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   windows:
     runs-on: windows-2025
     timeout-minutes: 45
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Check formatting
         run: cargo fmt --check
       - name: Test native engine
-        run: cargo test --locked --lib
+        run: cargo test --locked --lib --no-default-features
+      - name: Check native engine with Clippy
+        run: cargo clippy --locked --lib --no-default-features -- -D warnings
       - name: Build native Windows application
         run: cargo build --locked --release --bins
       - name: Benchmark native market analysis
@@ -46,6 +52,7 @@ jobs:
           New-Item -ItemType Directory -Force release/portable | Out-Null
           Copy-Item release/VigilantEngine-Native-0.3.0-x64.exe release/portable/
           Copy-Item WINDOWS.md release/portable/README.txt
+          Copy-Item LICENSE release/portable/LICENSE.txt
           Copy-Item release/benchmark.json release/portable/
           Compress-Archive -Path release/portable/* -DestinationPath release/VigilantEngine-Native-0.3.0-x64.zip
           Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe','.zip' } | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content release/SHA256SUMS.txt
@@ -62,3 +69,9 @@ jobs:
             release/*.log
           if-no-files-found: warn
           retention-days: 14
+      - name: Publish verified native release
+        if: success() && contains(github.event.head_commit.message, '[release-native]')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-native.ps1

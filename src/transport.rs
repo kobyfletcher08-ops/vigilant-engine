@@ -230,11 +230,11 @@ impl Transport {
             cache_hits: m.hits.load(Ordering::Relaxed),
             active: m.active.load(Ordering::Relaxed),
             peak_concurrency: m.peak.load(Ordering::Relaxed),
-            average_ms: if r > 0 {
-                m.elapsed.load(Ordering::Relaxed) / r
-            } else {
-                0
-            },
+            average_ms: m
+                .elapsed
+                .load(Ordering::Relaxed)
+                .checked_div(r)
+                .unwrap_or(0),
             errors: m.errors.load(Ordering::Relaxed),
             cached_entries: c.len(),
             cache_bytes: c.values().map(|v| v.bytes).sum(),
@@ -246,8 +246,8 @@ impl Transport {
     fn key(proxy: &str) -> String {
         hex::encode(Sha256::digest(proxy.as_bytes()))
     }
-    fn client(&self, proxy: &str) -> Result<Client> {
-        let key = Self::key(proxy);
+    fn client(&self, proxy: &str, rotating_market: bool) -> Result<Client> {
+        let key = format!("{}:{rotating_market}", Self::key(proxy));
         if let Some(c) = self.clients.lock().unwrap().get(&key) {
             return Ok(c.clone());
         }
@@ -266,6 +266,12 @@ impl Transport {
             builder = builder.proxy(agent);
         } else {
             builder = builder.no_proxy();
+        }
+        // A rotating CONNECT gateway usually selects its exit per tunnel. Reusing an
+        // HTTP/2 connection would pin several requests to that exit. Keep direct
+        // and RPC clients pooled, but use a fresh tunnel for each proxied market fetch.
+        if rotating_market && !proxy.trim().is_empty() {
+            builder = builder.http1_only().pool_max_idle_per_host(0);
         }
         let c = builder
             .build()
@@ -293,7 +299,7 @@ impl Transport {
             .acquire()
             .await
             .map_err(|_| "Network engine stopped.")?;
-        let client = self.client(proxy)?;
+        let client = self.client(proxy, url.starts_with("https://api.dexscreener.com/"))?;
         let started = Instant::now();
         let n = self.metrics.active.fetch_add(1, Ordering::Relaxed) + 1;
         self.metrics.peak.fetch_max(n, Ordering::Relaxed);
@@ -363,7 +369,22 @@ impl Transport {
         if !path.starts_with('/') || path.starts_with("//") {
             return Err("Invalid market API path.".into());
         }
-        let key = Self::key(proxy) + path;
+        self.cached_json(
+            &("https://api.dexscreener.com".to_string() + path),
+            ttl,
+            metadata,
+            proxy,
+        )
+        .await
+    }
+    async fn cached_json(
+        &self,
+        url: &str,
+        ttl: Duration,
+        metadata: bool,
+        proxy: &str,
+    ) -> Result<Arc<Value>> {
+        let key = Self::key(proxy) + url;
         if let Some(c) = self
             .cache
             .lock()
@@ -390,14 +411,7 @@ impl Transport {
                     &self.market
                 };
                 window.lock().unwrap().take(Instant::now())?;
-                let value = Arc::new(
-                    self.json(
-                        &("https://api.dexscreener.com".to_string() + path),
-                        None,
-                        proxy,
-                    )
-                    .await?,
-                );
+                let value = Arc::new(self.json(url, None, proxy).await?);
                 let bytes = value.to_string().len();
                 let mut cache = self.cache.lock().unwrap();
                 cache.retain(|_, c| c.expires > Instant::now());
@@ -469,5 +483,91 @@ mod tests {
         assert!(rpc_url("http://localhost:8899").is_ok());
         assert!(rpc_url("http://127.0.0.1:8545").is_ok());
         assert!(rpc_url("https://user:secret@host.test").is_err());
+    }
+    #[tokio::test]
+    async fn rotating_gateway_uses_new_authenticated_connection_per_request() {
+        use crate::test_server::server;
+        let proxy = server(|_| (200, serde_json::json!({"ok":true})), Duration::ZERO).await;
+        let endpoint = proxy.url.trim_start_matches("http://");
+        let t = Transport::new();
+        let client = t
+            .client(&format!("{endpoint}:user:pa:ss@word"), true)
+            .unwrap();
+        for _ in 0..2 {
+            let v: Value = client
+                .get("http://destination.invalid/market")
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(v["ok"], true);
+        }
+        assert_eq!(proxy.connections.load(Ordering::SeqCst), 2);
+        let captured = proxy.headers.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        for h in captured.iter() {
+            assert!(h.starts_with("GET http://destination.invalid/market"));
+            assert!(h
+                .to_ascii_lowercase()
+                .contains("proxy-authorization: basic dxnlcjpwytpzc0b3b3jk"));
+        }
+    }
+    #[tokio::test]
+    async fn concurrent_cache_misses_are_coalesced_and_expire() {
+        use crate::test_server::server;
+        let remote = server(
+            |_| (200, serde_json::json!({"pool":1})),
+            Duration::from_millis(30),
+        )
+        .await;
+        let t = Transport::new();
+        let results = futures::future::join_all(
+            (0..20).map(|_| t.cached_json(&remote.url, Duration::from_millis(80), false, "")),
+        )
+        .await;
+        assert!(results.iter().all(|r| r.as_ref().unwrap()["pool"] == 1));
+        assert_eq!(remote.requests.load(Ordering::SeqCst), 1);
+        t.cached_json(&remote.url, Duration::from_millis(80), false, "")
+            .await
+            .unwrap();
+        assert_eq!(t.stats().cache_hits, 1);
+        tokio::time::sleep(Duration::from_millis(90)).await;
+        t.cached_json(&remote.url, Duration::from_millis(80), false, "")
+            .await
+            .unwrap();
+        assert_eq!(remote.requests.load(Ordering::SeqCst), 2);
+    }
+    #[tokio::test]
+    async fn connection_capacity_is_bounded_and_bad_proxy_never_falls_back() {
+        use crate::test_server::server;
+        let remote = server(
+            |_| (200, serde_json::json!({"ok":true})),
+            Duration::from_millis(20),
+        )
+        .await;
+        let t = Transport::new();
+        let results =
+            futures::future::join_all((0..24).map(|_| t.json(&remote.url, None, ""))).await;
+        assert!(results.iter().all(|r| r.is_ok()));
+        assert_eq!(remote.requests.load(Ordering::SeqCst), 24);
+        let stats = t.stats();
+        assert!(stats.peak_concurrency <= 8 && stats.peak_concurrency > 1);
+        assert_eq!(stats.active, 0);
+        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = socket.local_addr().unwrap().port();
+        drop(socket);
+        let err = t
+            .json(
+                &remote.url,
+                None,
+                &format!("127.0.0.1:{port}:secret:password"),
+            )
+            .await
+            .unwrap_err();
+        assert!(!err.contains("secret"));
+        assert!(!err.contains("password"));
+        assert_eq!(remote.requests.load(Ordering::SeqCst), 24);
     }
 }

@@ -7,7 +7,7 @@ A Windows arbitrage console with a native Rust backend and the Windows WebView2 
 - Catalogue of all 64 chains listed by DEX Screener when this release was prepared, plus valid chain identifiers returned by its API.
 - Track any DEX platform returned by the public API; top gainers, volume and liquidity rankings; exact-address cross-pool comparisons; watchlists; search; live price trails and CSV export.
 - Concurrent pooled HTTP, 30-token API batches, in-flight request coalescing, bounded caches and response sizes, shared request budgets and HTTP 429 cooldowns. RPC traffic retains request capacity during market refreshes.
-- A default authenticated HTTP/HTTPS proxy and an independent DEX Screener proxy override, accepting `hostname:port:login:password` or a proxy URL. Proxy failures do not fall back to a direct connection. Proxies do not remove upstream quotas.
+- A default authenticated HTTP/HTTPS proxy and an independent DEX Screener proxy override, accepting `hostname:port:login:password` or a proxy URL. Rotating gateways receive a fresh HTTP/1 connection per outgoing market request so HTTPS tunnel pooling cannot pin their exit IP. Direct and RPC requests retain connection pooling. Proxy failures do not fall back to a direct connection. Proxies do not remove upstream quotas.
 
 DEX Screener's public API provides discovery/search and token pair endpoints, not an exhaustive all-pools or chain-wide top-gainers feed. Rankings cover the pools the app has fetched. A displayed market spread is not an executable profit.
 
