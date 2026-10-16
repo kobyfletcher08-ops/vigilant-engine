@@ -36,6 +36,7 @@ jobs:
           repo = os.environ['GH_REPO']
           run_id = '38748882400'
           source = '4e449d13b92f51ef6b2779d05d5928ed6edd90d9'
+          target = os.environ['GITHUB_SHA']
           tag = 'v0.2.1'
 
           def gh(*args):
@@ -50,6 +51,9 @@ jobs:
           jobs = api(f'actions/runs/{run_id}/jobs')['jobs']
           windows_jobs = [j for j in jobs if j['name'] == 'windows']
           assert len(windows_jobs) == 1 and windows_jobs[0]['id'] == 116469696025 and windows_jobs[0]['conclusion'] == 'success', 'Verified Windows build must pass before release'
+          comparison = api(f'compare/{source}...{target}')
+          assert comparison['merge_base_commit']['sha'] == source, 'Release must descend from the verified source'
+          assert all(f['filename'] in {'.github/workflows/windows-desktop.yml', '.github/workflows/windows-release.yml'} for f in comparison['files']), 'Application changed since the verified Windows build'
           artifacts = api(f'actions/runs/{run_id}/artifacts')['artifacts']
           matching = [a for a in artifacts if a['name'] == 'VigilantEngine-Windows-x64' and not a['expired']]
           assert len(matching) == 1 and matching[0]['id'] == 11979944817, 'Unexpected build artifact'
@@ -90,11 +94,11 @@ jobs:
           assert len(matching_releases) <= 1, 'Ambiguous release tag'
           if not matching_releases:
               release = json.loads(gh('api', f'repos/{repo}/releases', '--method', 'POST',
-                  '-f', f'tag_name={tag}', '-f', f'target_commitish={source}',
+                  '-f', f'tag_name={tag}', '-f', f'target_commitish={target}',
                   '-f', 'name=Vigilant Engine 0.2.1 — Windows origin fix', '-F', 'draft=true', '-f', f'body={notes}'))
           else:
               release = matching_releases[0]
-          assert release['target_commitish'] == source, 'Existing release targets another source'
+          assert release['target_commitish'] == target, 'Existing release targets another source'
           release_path = f"releases/{release['id']}"
 
           assets = {a['name']: a for a in release['assets']}
